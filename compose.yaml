@@ -1,0 +1,35 @@
+services:
+  mail-digester:
+    container_name: mail-digester
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mail-digester:latest
+    restart: unless-stopped
+    user: "1000:1000"
+    ports:
+      - "4001:4001"
+    environment:
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      PORT: "4001"
+      HOSTNAME: "0.0.0.0"
+      HOME: /home/node
+      GWS_BINARY: gws
+      MAIL_DIGESTER_DB_PATH: /app/data/mail-digester.sqlite
+      GMAIL_TLDR_QUERY: ${GMAIL_TLDR_QUERY:-is:unread from:tldrnewsletter.com}
+    volumes:
+      - ./data:/app/data
+      - ${MAIL_DIGESTER_GWS_CONFIG_DIR:-/home/lilfeel/.config/gws}:/home/node/.config/gws
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4001/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s

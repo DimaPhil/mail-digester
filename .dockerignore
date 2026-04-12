@@ -1,0 +1,12 @@
+.git
+.github
+.husky
+.next
+coverage
+data
+node_modules
+test-results
+tsconfig.tsbuildinfo
+e2e
+test
+README.md
