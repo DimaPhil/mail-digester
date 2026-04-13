@@ -65,58 +65,105 @@ export function loadInteractions({ dbPath, sinceDays }) {
   });
 
   try {
-    const table = db
+    const interactionTable = db
       .prepare(
         "SELECT name FROM sqlite_master WHERE type = ? AND name = ? LIMIT 1",
       )
       .get("table", "item_interactions");
 
-    if (table?.name !== "item_interactions") {
+    if (interactionTable?.name !== "item_interactions") {
       return {
         interactions: [],
         warning: "item_interactions table does not exist yet.",
       };
     }
 
+    const snapshotsTable = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = ? AND name = ? LIMIT 1",
+      )
+      .get("table", "article_snapshots");
+    const canJoinSnapshots = snapshotsTable?.name === "article_snapshots";
+
     const since =
       sinceDays && sinceDays > 0
         ? Date.now() - sinceDays * 24 * 60 * 60 * 1000
         : null;
+
+    const fromClause = canJoinSnapshots
+      ? `
+          FROM item_interactions interactions
+          LEFT JOIN article_snapshots snapshots
+            ON snapshots.url_key = COALESCE(
+              NULLIF(interactions.canonical_url, ''),
+              NULLIF(interactions.final_url, ''),
+              interactions.tracked_url
+            )
+        `
+      : `
+          FROM item_interactions interactions
+        `;
+    const snapshotSelect = canJoinSnapshots
+      ? `
+              snapshots.status AS snapshotStatus,
+              snapshots.source_url AS snapshotSourceUrl,
+              snapshots.final_url AS snapshotFinalUrl,
+              snapshots.title AS snapshotTitle,
+              snapshots.byline AS snapshotByline,
+              snapshots.site_name AS snapshotSiteName,
+              snapshots.excerpt AS snapshotExcerpt,
+              snapshots.content_text AS snapshotContentText,
+              snapshots.error_message AS snapshotErrorMessage,
+              snapshots.fetched_at AS snapshotFetchedAt
+        `
+      : `
+              NULL AS snapshotStatus,
+              NULL AS snapshotSourceUrl,
+              NULL AS snapshotFinalUrl,
+              NULL AS snapshotTitle,
+              NULL AS snapshotByline,
+              NULL AS snapshotSiteName,
+              NULL AS snapshotExcerpt,
+              NULL AS snapshotContentText,
+              NULL AS snapshotErrorMessage,
+              NULL AS snapshotFetchedAt
+        `;
 
     return {
       interactions: db
         .prepare(
           `
             SELECT
-              id,
-              item_id AS itemId,
-              email_id AS emailId,
-              action,
-              resolve_mode AS resolveMode,
-              opened_before_resolve AS openedBeforeResolve,
-              provider,
-              provider_message_id AS providerMessageId,
-              provider_thread_id AS providerThreadId,
-              source_family AS sourceFamily,
-              source_variant AS sourceVariant,
-              sender_name AS senderName,
-              sender_email AS senderEmail,
-              email_subject AS emailSubject,
-              email_received_at AS emailReceivedAt,
-              section,
-              position,
-              item_kind AS itemKind,
-              read_time_text AS readTimeText,
-              title,
-              full_description AS fullDescription,
-              tracked_url AS trackedUrl,
-              canonical_url AS canonicalUrl,
-              final_url AS finalUrl,
-              metadata_json AS metadataJson,
-              created_at AS createdAt
-            FROM item_interactions
-            WHERE (? IS NULL OR created_at >= ?)
-            ORDER BY created_at ASC, id ASC
+              interactions.id AS id,
+              interactions.item_id AS itemId,
+              interactions.email_id AS emailId,
+              interactions.action AS action,
+              interactions.resolve_mode AS resolveMode,
+              interactions.opened_before_resolve AS openedBeforeResolve,
+              interactions.provider AS provider,
+              interactions.provider_message_id AS providerMessageId,
+              interactions.provider_thread_id AS providerThreadId,
+              interactions.source_family AS sourceFamily,
+              interactions.source_variant AS sourceVariant,
+              interactions.sender_name AS senderName,
+              interactions.sender_email AS senderEmail,
+              interactions.email_subject AS emailSubject,
+              interactions.email_received_at AS emailReceivedAt,
+              interactions.section AS section,
+              interactions.position AS position,
+              interactions.item_kind AS itemKind,
+              interactions.read_time_text AS readTimeText,
+              interactions.title AS title,
+              interactions.full_description AS fullDescription,
+              interactions.tracked_url AS trackedUrl,
+              interactions.canonical_url AS canonicalUrl,
+              interactions.final_url AS finalUrl,
+              interactions.metadata_json AS metadataJson,
+              interactions.created_at AS createdAt,
+            ${snapshotSelect}
+            ${fromClause}
+            WHERE (? IS NULL OR interactions.created_at >= ?)
+            ORDER BY interactions.created_at ASC, interactions.id ASC
           `,
         )
         .all(since, since),

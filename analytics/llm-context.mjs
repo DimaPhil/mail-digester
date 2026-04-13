@@ -7,8 +7,23 @@ import {
   writeOutput,
 } from "./common.mjs";
 
+const FILTER_RECOMMENDATION_SCHEMA_PATH =
+  "analytics/filter-recommendations.schema.json";
+
 function itemKey(row) {
   return `${row.sourceVariant}::${row.title}::${row.canonicalUrl ?? row.finalUrl ?? row.trackedUrl}`;
+}
+
+function truncateText(input, limit) {
+  if (!input) {
+    return null;
+  }
+
+  if (input.length <= limit) {
+    return input;
+  }
+
+  return `${input.slice(0, limit - 1).trimEnd()}…`;
 }
 
 function summarizeItems(interactions) {
@@ -26,6 +41,12 @@ function summarizeItems(interactions) {
       fullDescription: row.fullDescription,
       canonicalUrl: row.canonicalUrl,
       finalUrl: row.finalUrl,
+      snapshotStatus: row.snapshotStatus,
+      snapshotTitle: row.snapshotTitle,
+      snapshotByline: row.snapshotByline,
+      snapshotSiteName: row.snapshotSiteName,
+      snapshotExcerpt: row.snapshotExcerpt,
+      snapshotContentText: row.snapshotContentText,
       emailSubjects: new Set(),
       linkOpens: 0,
       resolvesAfterOpen: 0,
@@ -61,7 +82,28 @@ function summarizeItems(interactions) {
         item.resolvesAfterOpen * 4 -
         item.directResolves * 2 +
         item.unresolves,
+      articleSnapshot: item.snapshotStatus
+        ? {
+            status: item.snapshotStatus,
+            title: item.snapshotTitle,
+            byline: item.snapshotByline,
+            siteName: item.snapshotSiteName,
+            excerpt: item.snapshotExcerpt,
+            contentTextPreview: truncateText(item.snapshotContentText, 2400),
+          }
+        : null,
     }))
+    .map(
+      ({
+        snapshotStatus: _snapshotStatus,
+        snapshotTitle: _snapshotTitle,
+        snapshotByline: _snapshotByline,
+        snapshotSiteName: _snapshotSiteName,
+        snapshotExcerpt: _snapshotExcerpt,
+        snapshotContentText: _snapshotContentText,
+        ...item
+      }) => item,
+    )
     .sort((a, b) => {
       const eventDelta =
         b.linkOpens +
@@ -81,30 +123,39 @@ function buildPayload(input) {
     dbPath: input.dbPath,
     warning: input.warning,
     instructions:
-      "Infer the reader's interests from TLDR newsletter interactions. Resolving after opening a link is strong positive evidence. Opening without resolving is medium positive evidence. Direct resolve without opening is negative/low-interest evidence. Undo/unresolve is weak positive evidence. Do not overfit tiny samples; call out low confidence when evidence is sparse.",
+      "Infer the reader's interests from TLDR newsletter interactions. Resolving after opening a link is strong positive evidence. Opening without resolving is medium positive evidence. Direct resolve without opening is negative or low-interest evidence. Use the newsletter title and fullDescription for every item, plus articleSnapshot fields when they exist because the article was opened and extracted. Return only reversible recommendations and avoid overfitting sparse samples.",
+    filterRecommendationSchemaPath: FILTER_RECOMMENDATION_SCHEMA_PATH,
     desiredOutputSchema: {
       summary: "Brief human-readable interest profile.",
-      interestsToPrioritize: [
+      generatedAt: "ISO-8601 timestamp",
+      rules: [
         {
-          theme: "string",
-          evidence: "string",
-          confidence: "low | medium | high",
-        },
-      ],
-      itemsToDeprioritize: [
-        {
-          theme: "string",
-          evidence: "string",
-          confidence: "low | medium | high",
-        },
-      ],
-      candidateFilteringRules: [
-        {
+          id: "stable-rule-id",
+          name: "Human-readable rule name",
+          enabled: false,
+          source: "llm",
           action: "promote | deprioritize | hide",
-          rule: "string",
-          rationale: "string",
           confidence: "low | medium | high",
           reversible: true,
+          rationale: "Why this rule exists.",
+          conditions: [
+            {
+              field:
+                "sourceVariant | section | itemKind | title | fullDescription | keyword | titlePhrase | siteName | canonicalUrl",
+              operator: "equals | contains | startsWith | anyOf",
+              value: "string or string[]",
+            },
+          ],
+          evidence: {
+            interactionCount: 0,
+            uniqueItemCount: 0,
+            linkOpens: 0,
+            resolvesAfterOpen: 0,
+            directResolves: 0,
+            unresolves: 0,
+            exampleTitles: ["string"],
+          },
+          createdAt: "ISO-8601 timestamp",
         },
       ],
       questionsToAskUser: ["string"],
@@ -137,6 +188,8 @@ DB: \`${payload.dbPath}\`
 ${payload.warning ? `Warning: ${payload.warning}\n` : ""}## Task
 
 ${payload.instructions}
+
+JSON schema path for future app integration: \`${payload.filterRecommendationSchemaPath}\`
 
 ## Evidence Counts
 

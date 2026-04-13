@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mail-digester.local/schemas/filter-recommendations.schema.json",
+  "title": "Mail Digester Filter Recommendation Bundle",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "generatedAt", "rules", "questionsToAskUser"],
+  "properties": {
+    "summary": {
+      "type": "string"
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "enabled",
+          "source",
+          "action",
+          "confidence",
+          "reversible",
+          "rationale",
+          "conditions",
+          "evidence",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string",
+            "enum": ["llm", "manual", "analytics"]
+          },
+          "action": {
+            "type": "string",
+            "enum": ["promote", "deprioritize", "hide"]
+          },
+          "confidence": {
+            "type": "string",
+            "enum": ["low", "medium", "high"]
+          },
+          "reversible": {
+            "type": "boolean"
+          },
+          "rationale": {
+            "type": "string"
+          },
+          "conditions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["field", "operator", "value"],
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "enum": [
+                    "sourceVariant",
+                    "section",
+                    "itemKind",
+                    "title",
+                    "fullDescription",
+                    "keyword",
+                    "titlePhrase",
+                    "siteName",
+                    "canonicalUrl"
+                  ]
+                },
+                "operator": {
+                  "type": "string",
+                  "enum": ["equals", "contains", "startsWith", "anyOf"]
+                },
+                "value": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "evidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "interactionCount",
+              "uniqueItemCount",
+              "linkOpens",
+              "resolvesAfterOpen",
+              "directResolves",
+              "unresolves",
+              "exampleTitles"
+            ],
+            "properties": {
+              "interactionCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "uniqueItemCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "linkOpens": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "resolvesAfterOpen": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "directResolves": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "unresolves": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "exampleTitles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    "questionsToAskUser": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

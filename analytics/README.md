@@ -1,8 +1,9 @@
 # Analytics
 
-Local scripts for turning `item_interactions` rows into early interest signals.
-They are intentionally conservative: until enough events exist, the output will
-say that the sample is too small and avoid strong filtering recommendations.
+Scripts for turning `item_interactions` rows into early interest signals and
+exporting them from the Ubuntu server in LLM-friendly formats. They are
+intentionally conservative: until enough events exist, the output will say that
+the sample is too small and avoid strong filtering recommendations.
 
 ## Model
 
@@ -26,6 +27,31 @@ The scripts aggregate those signals by:
 
 This should be enough to bootstrap future automated filtering without deciding
 too early from a tiny sample.
+
+## What Gets Tracked
+
+Every interaction row snapshots the newsletter item state at the time of the
+action, including direct resolves where the article was never opened:
+
+- `title`
+- `fullDescription` from the newsletter body
+- source metadata such as `sourceVariant`, `section`, `itemKind`
+- URLs: `trackedUrl`, `canonicalUrl`, `finalUrl`
+- resolve metadata, including whether the item was opened before resolving
+
+When an article has been opened and extracted, analytics exports also join the
+cached `article_snapshots` data when available:
+
+- `snapshotStatus`
+- `snapshotTitle`
+- `snapshotByline`
+- `snapshotSiteName`
+- `snapshotExcerpt`
+- `snapshotContentText`
+
+This means unresolved-via-click and direct-resolve behaviors are both useful for
+later filtering analysis. Direct resolves always keep the newsletter title and
+description; opened items can additionally contribute article text.
 
 ## Interest Analysis
 
@@ -73,9 +99,9 @@ node analytics/analyze-interests.mjs --db ./data/mail-digester.sqlite
 
 ## LLM Context
 
-Generate a prompt-ready Markdown bundle with instructions, desired output schema,
-aggregate counts, and item evidence including source variant, title, full
-description, and interaction counts:
+Generate a prompt-ready Markdown bundle with instructions, a future app-side
+filter-rule contract, aggregate counts, and item evidence including source
+variant, title, full description, and article snapshot previews when available:
 
 ```bash
 npm run analytics:llm-context -- --out analytics/out/llm-context.md
@@ -97,8 +123,9 @@ analytics/run-in-container.sh llm-context --out /tmp/mail-digester-llm-context.m
 Suggested workflow after a few complete emails:
 
 - Run `npm run analytics:llm-context`.
-- Paste the output into an LLM and ask it to infer interests and propose reversible filtering rules.
-- Convert only high-confidence, easy-to-undo suggestions into app-side filters.
+- Paste the output into an LLM and ask it to return JSON that matches `analytics/filter-recommendations.schema.json`.
+- Review only high-confidence, easy-to-undo suggestions before enabling any filter.
+- Use the same schema later inside the app when adding persisted filtering rules.
 - Keep collecting raw interactions so future rules can be validated against behavior.
 
 ## Raw Export
@@ -118,3 +145,17 @@ analytics/run-in-container.sh export --format jsonl --out /tmp/mail-digester-int
 ```
 
 `analytics/out/` is gitignored.
+
+## Ubuntu-First Workflow
+
+The metrics live in the Ubuntu Docker volume. Use one of these paths:
+
+- Local machine to remote Ubuntu via SSH:
+  `npm run analytics:export -- --format jsonl --out analytics/out/interactions.jsonl`
+- Already on Ubuntu:
+  `./analytics/run-in-container.sh export --format jsonl --out /tmp/mail-digester-interactions.jsonl`
+- LLM-ready bundle from Ubuntu:
+  `./analytics/run-in-container.sh llm-context --out /tmp/mail-digester-llm-context.md`
+
+The `llm-context` output is the preferred handoff for an LLM. The raw `export`
+output is better for custom offline analysis or building future importers.
