@@ -19,6 +19,11 @@
     "test:e2e": "playwright test",
     "verify": "npm run check && npm run test:coverage",
     "verify:full": "npm run verify && npm run build && npm run test:e2e",
+    "analytics:interests": "analytics/run-on-server.sh interests",
+    "analytics:interests:json": "analytics/run-on-server.sh interests --format json",
+    "analytics:llm-context": "analytics/run-on-server.sh llm-context",
+    "analytics:llm-context:json": "analytics/run-on-server.sh llm-context --format json",
+    "analytics:export": "analytics/run-on-server.sh export",
     "db:studio": "drizzle-kit studio"
   },
   "repository": {
