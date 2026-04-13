@@ -9,9 +9,11 @@ import {
   RefreshCcw,
   Sparkles,
   Undo2,
+  X,
 } from "lucide-react";
 import {
   startTransition,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -78,6 +80,8 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
   const [sync, setSync] = useState(initialData.sync);
   const [undoState, setUndoState] = useState<UndoState>(null);
   const [resolvingIds, setResolvingIds] = useState<number[]>([]);
+  const pendingResolvedIds = useRef<Set<number>>(new Set());
+  const openedItemIds = useRef<Set<number>>(new Set());
   const [selectedEmailId, setSelectedEmailId] = useState<number | null>(null);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [expandedSummaryIds, setExpandedSummaryIds] = useState<Set<number>>(
@@ -152,6 +156,52 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     };
   }, [selectedEmail]);
 
+  const applyPendingResolutions = useCallback(
+    (nextEmails: InboxPayload["emails"]) => {
+      if (pendingResolvedIds.current.size === 0) {
+        return nextEmails;
+      }
+
+      const timestamp = Date.now();
+      return nextEmails.map((email) => {
+        let changed = false;
+        const nextItems = email.items.map((item) => {
+          if (
+            !pendingResolvedIds.current.has(item.id) ||
+            item.resolvedAt != null
+          ) {
+            return item;
+          }
+
+          changed = true;
+          return {
+            ...item,
+            resolvedAt: timestamp,
+          };
+        });
+
+        if (!changed) {
+          return email;
+        }
+
+        const resolvedItems = nextItems.filter(
+          (item) => item.resolvedAt != null,
+        ).length;
+
+        return {
+          ...email,
+          completionState:
+            resolvedItems >= email.totalItems
+              ? "complete"
+              : email.completionState,
+          resolvedItems,
+          items: nextItems,
+        };
+      });
+    },
+    [],
+  );
+
   useEffect(() => {
     setHydrated(true);
   }, []);
@@ -170,12 +220,34 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     }
   }, [selectedEmail, selectedEmailId, visibleEmails]);
 
-  async function syncInboxData() {
+  useEffect(() => {
+    if (!mobileDetailOpen || !selectedEmail) {
+      return;
+    }
+
+    const unresolvedCount = selectedEmail.items.filter(
+      (item) => item.resolvedAt == null,
+    ).length;
+
+    if (unresolvedCount > 0) {
+      return;
+    }
+
+    setMobileDetailOpen(false);
+    window.requestAnimationFrame(() => {
+      window.scrollTo({
+        top: 0,
+        behavior: "smooth",
+      });
+    });
+  }, [mobileDetailOpen, selectedEmail]);
+
+  const syncInboxData = useCallback(async () => {
     const payload = await readJson<InboxPayload>("/api/inbox");
-    setEmails(payload.emails);
+    setEmails(applyPendingResolutions(payload.emails));
     setSync(payload.sync);
     return payload;
-  }
+  }, [applyPendingResolutions]);
 
   function stopPolling() {
     if (pollTimer.current != null) {
@@ -262,7 +334,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
             method: "POST",
           });
           startTransition(() => {
-            setEmails(payload.emails);
+            setEmails(applyPendingResolutions(payload.emails));
             setSync(payload.sync);
           });
         } finally {
@@ -271,7 +343,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
         }
       })();
     }
-  }, [initialData.shouldAutoSync]);
+  }, [applyPendingResolutions, initialData.shouldAutoSync, syncInboxData]);
 
   function formatEmailDate(timestamp: number) {
     if (!hydrated) {
@@ -289,6 +361,58 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     return `Last sync ${formatRelativeDate(timestamp)}`;
   }
 
+  function getInteractionMetadata(
+    extra: Record<string, boolean | number | string | null> = {},
+  ) {
+    const layout =
+      typeof window !== "undefined" &&
+      window.matchMedia("(max-width: 1023px)").matches
+        ? "mobile"
+        : "desktop";
+
+    return {
+      layout,
+      viewportWidth: typeof window !== "undefined" ? window.innerWidth : null,
+      viewportHeight: typeof window !== "undefined" ? window.innerHeight : null,
+      timezone:
+        typeof Intl !== "undefined"
+          ? Intl.DateTimeFormat().resolvedOptions().timeZone
+          : null,
+      clientTimestamp: Date.now(),
+      ...extra,
+    };
+  }
+
+  function trackLinkOpen(itemId: number, href: string) {
+    openedItemIds.current.add(itemId);
+
+    const body = JSON.stringify({
+      metadata: getInteractionMetadata({
+        href,
+      }),
+    });
+    const url = `/api/items/${itemId}/link-open`;
+
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon(
+        url,
+        new Blob([body], {
+          type: "application/json",
+        }),
+      );
+      return;
+    }
+
+    void fetch(url, {
+      body,
+      headers: {
+        "Content-Type": "application/json",
+      },
+      keepalive: true,
+      method: "POST",
+    });
+  }
+
   async function resolveItem(itemId: number) {
     const item = emails
       .flatMap((email) => email.items)
@@ -297,7 +421,14 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
       return;
     }
 
-    setResolvingIds((current) => [...current, itemId]);
+    if (pendingResolvedIds.current.has(itemId)) {
+      return;
+    }
+
+    pendingResolvedIds.current.add(itemId);
+    setResolvingIds((current) =>
+      current.includes(itemId) ? current : [...current, itemId],
+    );
     setUndoState({
       itemId,
       title: item.title,
@@ -322,14 +453,24 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
       const payload = await readJson<{ emails: InboxPayload["emails"] }>(
         `/api/items/${itemId}/resolve`,
         {
+          body: JSON.stringify({
+            metadata: getInteractionMetadata({
+              clientOpenedBeforeResolve: openedItemIds.current.has(itemId),
+            }),
+          }),
+          headers: {
+            "Content-Type": "application/json",
+          },
           method: "POST",
         },
       );
-      setEmails(payload.emails);
+      setEmails(applyPendingResolutions(payload.emails));
     } catch {
+      pendingResolvedIds.current.delete(itemId);
       setEmails(previous);
       setUndoState(null);
     } finally {
+      pendingResolvedIds.current.delete(itemId);
       setResolvingIds((current) => current.filter((entry) => entry !== itemId));
       void syncInboxData();
     }
@@ -346,7 +487,8 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
         method: "POST",
       },
     );
-    setEmails(payload.emails);
+    pendingResolvedIds.current.delete(undoState.itemId);
+    setEmails(applyPendingResolutions(payload.emails));
     setUndoState(null);
     await syncInboxData();
   }
@@ -526,6 +668,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                                   <a
                                     className="text-base font-semibold leading-snug transition hover:text-[var(--accent-strong)] hover:underline sm:text-lg"
                                     href={href}
+                                    onClick={() => trackLinkOpen(item.id, href)}
                                     rel="noreferrer noopener"
                                     target="_blank"
                                   >
@@ -571,6 +714,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                                   <a
                                     className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-1.5 font-medium transition hover:border-[var(--accent)]"
                                     href={href}
+                                    onClick={() => trackLinkOpen(item.id, href)}
                                     rel="noreferrer noopener"
                                     target="_blank"
                                   >
@@ -900,24 +1044,34 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
         </section>
 
         {undoState ? (
-          <div className="fixed bottom-4 left-1/2 z-50 w-[min(92vw,680px)] -translate-x-1/2 rounded-[24px] border border-[var(--border)] bg-[var(--panel-strong)] p-4 shadow-[0_30px_80px_rgba(32,23,13,0.16)]">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="font-semibold">
+          <div className="fixed bottom-3 left-1/2 z-50 w-[min(92vw,520px)] -translate-x-1/2 rounded-[18px] border border-[var(--border)] bg-[var(--panel-strong)] p-3 shadow-[0_24px_60px_rgba(32,23,13,0.16)] sm:bottom-4">
+            <div className="flex items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold">
                   Resolved “{undoState.title}”.
                 </div>
-                <div className="text-sm text-[var(--muted)]">
+                <div className="text-xs text-[var(--muted)]">
                   Undo will restore the item to the selected email.
                 </div>
               </div>
-              <button
-                className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-white px-4 py-2 text-sm font-medium"
-                onClick={() => void undoResolve()}
-                type="button"
-              >
-                <Undo2 className="h-4 w-4" />
-                Undo
-              </button>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-white px-3 py-1.5 text-xs font-semibold"
+                  onClick={() => void undoResolve()}
+                  type="button"
+                >
+                  <Undo2 className="h-3.5 w-3.5" />
+                  Undo
+                </button>
+                <button
+                  aria-label="Dismiss notification"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[var(--border)] bg-white text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--text)]"
+                  onClick={() => setUndoState(null)}
+                  type="button"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           </div>
         ) : null}

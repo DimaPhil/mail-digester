@@ -105,6 +105,41 @@ function initializeSchema() {
       updated_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS item_interactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+      email_id INTEGER NOT NULL REFERENCES emails(id) ON DELETE CASCADE,
+      action TEXT NOT NULL,
+      resolve_mode TEXT,
+      opened_before_resolve INTEGER,
+      provider TEXT NOT NULL,
+      provider_message_id TEXT NOT NULL,
+      provider_thread_id TEXT,
+      source_family TEXT NOT NULL,
+      source_variant TEXT NOT NULL,
+      sender_name TEXT NOT NULL,
+      sender_email TEXT NOT NULL,
+      email_subject TEXT NOT NULL,
+      email_received_at INTEGER NOT NULL,
+      section TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      item_kind TEXT NOT NULL,
+      read_time_text TEXT,
+      title TEXT NOT NULL,
+      full_description TEXT NOT NULL,
+      tracked_url TEXT NOT NULL,
+      canonical_url TEXT,
+      final_url TEXT,
+      metadata_json TEXT,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS item_interactions_item_action_idx
+    ON item_interactions(item_id, action, created_at);
+
+    CREATE INDEX IF NOT EXISTS item_interactions_source_variant_idx
+    ON item_interactions(source_variant, action, created_at);
+
     CREATE TABLE IF NOT EXISTS sync_state (
       id INTEGER PRIMARY KEY,
       status TEXT NOT NULL,

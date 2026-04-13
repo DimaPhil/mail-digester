@@ -162,3 +162,41 @@ test("moves a fully resolved email into the completed section", async ({
     }),
   ).toBeVisible();
 });
+
+test("returns mobile users to the email list after fully resolving an email", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+
+  const emailButton = page.getByRole("button", {
+    name: /OpenAI roadmap .* Claude control panels .* new eval tooling/i,
+  });
+  await expect(emailButton).toBeVisible({ timeout: 20_000 });
+  await emailButton.click();
+
+  await page
+    .getByRole("checkbox", {
+      name: /Resolve OpenAI sharpens its enterprise roadmap/i,
+    })
+    .click();
+  await expect(
+    page.getByRole("button", { name: /Dismiss notification/i }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /Dismiss notification/i }).click();
+  await expect(
+    page.getByRole("button", { name: /Dismiss notification/i }),
+  ).toHaveCount(0);
+
+  for (const label of [
+    /Resolve Claude adds role-aware control panels/i,
+    /Resolve A practical guide to evaluation loops/i,
+  ]) {
+    await page.getByRole("checkbox", { name: label }).click();
+  }
+
+  await expect(
+    page.getByRole("button", { name: /Back to emails/i }),
+  ).toHaveCount(0);
+  await expect(emailButton).toBeVisible();
+});

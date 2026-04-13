@@ -8,6 +8,7 @@ import {
   listInboxEmails,
   markItemResolved,
   markItemUnresolved,
+  recordItemInteraction,
   refreshEmailCounts,
   setEmailGmailSyncPending,
   setSyncState,
@@ -15,6 +16,7 @@ import {
   upsertParsedEmail,
   upsertSnapshot,
 } from "@/lib/db/repository";
+import type { ItemInteractionMetadata } from "@/lib/db/repository";
 import { pickDigestSource } from "@/lib/digest";
 import { FixtureMailProvider } from "@/lib/mail/providers/fixture";
 import { GmailGwsProvider } from "@/lib/mail/providers/gmail-gws";
@@ -275,9 +277,20 @@ export async function openItem(itemId: number) {
   }
 }
 
+export async function recordLinkOpen(
+  itemId: number,
+  metadata: ItemInteractionMetadata = {},
+) {
+  await recordItemInteraction(itemId, "link_open", metadata);
+  return {
+    ok: true,
+  };
+}
+
 export async function resolveItem(
   itemId: number,
   services = createInboxServices(),
+  metadata: ItemInteractionMetadata = {},
 ) {
   const item = await getItemById(itemId);
   if (!item) {
@@ -285,6 +298,7 @@ export async function resolveItem(
   }
 
   const result = await markItemResolved(itemId);
+  await recordItemInteraction(itemId, "resolve", metadata);
 
   if (result.complete) {
     const email = await getEmailById(item.emailId);
@@ -309,5 +323,6 @@ export async function unresolveItem(itemId: number) {
   }
 
   await markItemUnresolved(itemId);
+  await recordItemInteraction(itemId, "unresolve");
   return listInboxEmails();
 }

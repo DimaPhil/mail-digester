@@ -151,6 +151,66 @@ describe("Inbox service", () => {
     expect(reopened.snapshot?.urlKey).toBe(opened.snapshot?.urlKey);
   });
 
+  it("records item interactions for direct resolves and link-open-first resolves", async () => {
+    const { service, repository } = await loadModules();
+
+    await service.syncInbox();
+    const payload = await service.getInboxPayload();
+    const firstEmail = payload.emails.find(
+      (email) => email.providerMessageId === "fixture-ai-001",
+    )!;
+    const directItem = firstEmail.items[0];
+    const openedItem = firstEmail.items[1];
+
+    await service.resolveItem(directItem.id, undefined, {
+      layout: "desktop",
+    });
+    await service.recordLinkOpen(openedItem.id, {
+      href:
+        openedItem.finalUrl ?? openedItem.canonicalUrl ?? openedItem.trackedUrl,
+      layout: "mobile",
+      viewportWidth: 390,
+    });
+    await service.resolveItem(openedItem.id, undefined, {
+      clientOpenedBeforeResolve: true,
+      layout: "mobile",
+    });
+
+    const interactions = await repository.listItemInteractions();
+    const directResolve = interactions.find(
+      (interaction) =>
+        interaction.itemId === directItem.id &&
+        interaction.action === "resolve",
+    );
+    const openedResolve = interactions.find(
+      (interaction) =>
+        interaction.itemId === openedItem.id &&
+        interaction.action === "resolve",
+    );
+    const linkOpen = interactions.find(
+      (interaction) =>
+        interaction.itemId === openedItem.id &&
+        interaction.action === "link_open",
+    );
+
+    expect(directResolve).toMatchObject({
+      sourceVariant: "TLDR AI",
+      title: directItem.title,
+      fullDescription: directItem.summary,
+      resolveMode: "direct",
+      openedBeforeResolve: false,
+    });
+    expect(openedResolve).toMatchObject({
+      sourceVariant: "TLDR AI",
+      title: openedItem.title,
+      fullDescription: openedItem.summary,
+      resolveMode: "after_open",
+      openedBeforeResolve: true,
+    });
+    expect(linkOpen?.metadataJson).toContain('"layout":"mobile"');
+    expect(linkOpen?.metadataJson).toContain('"viewportWidth":390');
+  });
+
   it("marks Gmail read after the final item resolves and can undo resolution", async () => {
     const { service } = await loadModules();
 

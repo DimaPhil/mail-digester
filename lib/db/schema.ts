@@ -82,6 +82,41 @@ export const articleSnapshots = sqliteTable("article_snapshots", {
   updatedAt: integer("updated_at", { mode: "number" }).notNull(),
 });
 
+export const itemInteractions = sqliteTable("item_interactions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  itemId: integer("item_id")
+    .notNull()
+    .references(() => items.id, { onDelete: "cascade" }),
+  emailId: integer("email_id")
+    .notNull()
+    .references(() => emails.id, { onDelete: "cascade" }),
+  action: text("action").notNull(),
+  resolveMode: text("resolve_mode"),
+  openedBeforeResolve: integer("opened_before_resolve", {
+    mode: "boolean",
+  }),
+  provider: text("provider").notNull(),
+  providerMessageId: text("provider_message_id").notNull(),
+  providerThreadId: text("provider_thread_id"),
+  sourceFamily: text("source_family").notNull(),
+  sourceVariant: text("source_variant").notNull(),
+  senderName: text("sender_name").notNull(),
+  senderEmail: text("sender_email").notNull(),
+  emailSubject: text("email_subject").notNull(),
+  emailReceivedAt: integer("email_received_at", { mode: "number" }).notNull(),
+  section: text("section").notNull(),
+  position: integer("position").notNull(),
+  itemKind: text("item_kind").notNull(),
+  readTimeText: text("read_time_text"),
+  title: text("title").notNull(),
+  fullDescription: text("full_description").notNull(),
+  trackedUrl: text("tracked_url").notNull(),
+  canonicalUrl: text("canonical_url"),
+  finalUrl: text("final_url"),
+  metadataJson: text("metadata_json"),
+  createdAt: integer("created_at", { mode: "number" }).notNull(),
+});
+
 export const syncState = sqliteTable("sync_state", {
   id: integer("id").primaryKey(),
   status: text("status").notNull(),

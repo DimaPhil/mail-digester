@@ -1,8 +1,21 @@
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/lib/db";
-import { articleSnapshots, emails, items, syncState } from "@/lib/db/schema";
+import {
+  articleSnapshots,
+  emails,
+  itemInteractions,
+  items,
+  syncState,
+} from "@/lib/db/schema";
 import type { ParsedDigestEmail } from "@/lib/digest/types";
 import { nowTs } from "@/lib/utils";
+
+export type ItemInteractionAction = "link_open" | "resolve" | "unresolve";
+
+export type ItemInteractionMetadata = Record<
+  string,
+  boolean | number | string | null | undefined
+>;
 
 export type InboxEmailItem = {
   id: number;
@@ -54,6 +67,7 @@ export type SyncStateRecord = {
 };
 
 export type SnapshotRecord = typeof articleSnapshots.$inferSelect;
+export type ItemInteractionRecord = typeof itemInteractions.$inferSelect;
 
 export async function setSyncState(
   input: Partial<SyncStateRecord> &
@@ -255,6 +269,81 @@ export async function getEmailById(emailId: number) {
   const db = getDb();
   return db.query.emails.findFirst({
     where: eq(emails.id, emailId),
+  });
+}
+
+export async function recordItemInteraction(
+  itemId: number,
+  action: ItemInteractionAction,
+  metadata: ItemInteractionMetadata = {},
+) {
+  const db = getDb();
+  const item = await getItemById(itemId);
+  if (!item) {
+    throw new Error("Item not found.");
+  }
+
+  const email = await getEmailById(item.emailId);
+  if (!email) {
+    throw new Error("Email not found.");
+  }
+
+  const existingOpens =
+    action === "resolve"
+      ? await db.query.itemInteractions.findMany({
+          where: and(
+            eq(itemInteractions.itemId, itemId),
+            eq(itemInteractions.action, "link_open"),
+          ),
+          limit: 1,
+        })
+      : [];
+  const clientOpenedBeforeResolve = metadata.clientOpenedBeforeResolve === true;
+  const openedBeforeResolve =
+    action === "resolve"
+      ? existingOpens.length > 0 || clientOpenedBeforeResolve
+      : null;
+  const metadataJson =
+    Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : null;
+
+  await db.insert(itemInteractions).values({
+    itemId,
+    emailId: email.id,
+    action,
+    resolveMode:
+      action === "resolve"
+        ? openedBeforeResolve
+          ? "after_open"
+          : "direct"
+        : null,
+    openedBeforeResolve,
+    provider: email.provider,
+    providerMessageId: email.providerMessageId,
+    providerThreadId: email.providerThreadId,
+    sourceFamily: email.sourceFamily,
+    sourceVariant: email.sourceVariant,
+    senderName: email.senderName,
+    senderEmail: email.senderEmail,
+    emailSubject: email.subject,
+    emailReceivedAt: email.receivedAt,
+    section: item.section,
+    position: item.position,
+    itemKind: item.itemKind,
+    readTimeText: item.readTimeText,
+    title: item.title,
+    fullDescription: item.summary,
+    trackedUrl: item.trackedUrl,
+    canonicalUrl: item.canonicalUrl,
+    finalUrl: item.finalUrl,
+    metadataJson,
+    createdAt: nowTs(),
+  });
+}
+
+export async function listItemInteractions() {
+  const db = getDb();
+  return db.query.itemInteractions.findMany({
+    orderBy: [asc(itemInteractions.createdAt)],
   });
 }
 
