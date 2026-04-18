@@ -2,6 +2,11 @@
 
 :root {
   color-scheme: light;
+  --font-space-grotesk:
+    "Avenir Next", Avenir, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-source-serif:
+    Iowan Old Style, Palatino, "Palatino Linotype", "Book Antiqua", Georgia,
+    serif;
   --bg: #f5efe5;
   --bg-strong: #f0e1c8;
   --panel: rgba(255, 250, 242, 0.92);
