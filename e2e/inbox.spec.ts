@@ -46,6 +46,55 @@ test("shows emails on the left and opens the selected email detail", async ({
   await expect(page.getByText(/Open link/i).first()).toBeVisible();
 });
 
+test("supports sorting emails newest-first while keeping oldest-first as the default", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const olderEmail = page.getByRole("button", {
+    name: /Compute race .* NASA systems .* programming hunches/i,
+  });
+  const newerEmail = page.getByRole("button", {
+    name: /OpenAI roadmap .* Claude control panels .* new eval tooling/i,
+  });
+
+  await expect(olderEmail).toBeVisible({ timeout: 20_000 });
+  await expect(newerEmail).toBeVisible({ timeout: 20_000 });
+
+  const defaultOlderBox = await olderEmail.boundingBox();
+  const defaultNewerBox = await newerEmail.boundingBox();
+
+  expect(defaultOlderBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(
+    defaultNewerBox?.y ?? Number.POSITIVE_INFINITY,
+  );
+
+  await page.getByRole("button", { name: /Newest first/i }).click();
+
+  const sortedOlderBox = await olderEmail.boundingBox();
+  const sortedNewerBox = await newerEmail.boundingBox();
+
+  expect(sortedNewerBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(
+    sortedOlderBox?.y ?? Number.POSITIVE_INFINITY,
+  );
+});
+
+test("supports a flat link view without requiring email selection", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  await page.getByRole("button", { name: /Flat links/i }).click();
+
+  await expect(
+    page.getByRole("link", {
+      name: /OpenAI sharpens its enterprise roadmap \(3 minute read\)/i,
+    }),
+  ).toBeVisible({ timeout: 20_000 });
+  await expect(
+    page.getByText(/One continuous queue of unresolved links/i),
+  ).toBeVisible();
+});
+
 test("opens email detail as a mobile master-detail view", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
@@ -114,6 +163,60 @@ test("resolves an item and supports undo", async ({ page }) => {
   await expect(
     page.getByText(/Resolved “Amazon escalates the infrastructure race/i),
   ).toBeVisible();
+
+  await page.getByRole("button", { name: /Undo/i }).click();
+  await expect(
+    page.getByRole("link", {
+      name: /Amazon escalates the infrastructure race \(5 minute read\)/i,
+    }),
+  ).toBeVisible();
+});
+
+test("keeps a resolved item hidden during a stale inbox refresh", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  const initialInbox = await page.evaluate(async () => {
+    const response = await fetch("/api/inbox");
+    return response.json();
+  });
+
+  let staleInboxServed = false;
+  await page.route("**/api/inbox", async (route) => {
+    if (staleInboxServed) {
+      await route.continue();
+      return;
+    }
+
+    staleInboxServed = true;
+    await route.fulfill({
+      body: JSON.stringify(initialInbox),
+      contentType: "application/json",
+      status: 200,
+    });
+  });
+
+  await page
+    .getByRole("button", {
+      name: /Compute race .* NASA systems .* programming hunches/i,
+    })
+    .click();
+
+  await page
+    .getByRole("checkbox", {
+      name: /Resolve Amazon escalates the infrastructure race/i,
+    })
+    .click();
+
+  await expect(
+    page.getByText(/Resolved “Amazon escalates the infrastructure race/i),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", {
+      name: /Amazon escalates the infrastructure race \(5 minute read\)/i,
+    }),
+  ).toHaveCount(0);
 
   await page.getByRole("button", { name: /Undo/i }).click();
   await expect(

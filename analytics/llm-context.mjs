@@ -48,6 +48,7 @@ function summarizeItems(interactions) {
       snapshotExcerpt: row.snapshotExcerpt,
       snapshotContentText: row.snapshotContentText,
       emailSubjects: new Set(),
+      descriptionExpands: 0,
       linkOpens: 0,
       resolvesAfterOpen: 0,
       directResolves: 0,
@@ -60,7 +61,9 @@ function summarizeItems(interactions) {
     current.firstSeenAt = Math.min(current.firstSeenAt, row.createdAt);
     current.lastSeenAt = Math.max(current.lastSeenAt, row.createdAt);
 
-    if (row.action === "link_open") {
+    if (row.action === "description_expand") {
+      current.descriptionExpands += 1;
+    } else if (row.action === "link_open") {
       current.linkOpens += 1;
     } else if (row.action === "unresolve") {
       current.unresolves += 1;
@@ -78,6 +81,7 @@ function summarizeItems(interactions) {
       ...item,
       emailSubjects: [...item.emailSubjects],
       interestScore:
+        item.descriptionExpands * 0.75 +
         item.linkOpens * 1.5 +
         item.resolvesAfterOpen * 4 -
         item.directResolves * 2 +
@@ -106,11 +110,16 @@ function summarizeItems(interactions) {
     )
     .sort((a, b) => {
       const eventDelta =
+        b.descriptionExpands +
         b.linkOpens +
         b.resolvesAfterOpen +
         b.directResolves +
         b.unresolves -
-        (a.linkOpens + a.resolvesAfterOpen + a.directResolves + a.unresolves);
+        (a.descriptionExpands +
+          a.linkOpens +
+          a.resolvesAfterOpen +
+          a.directResolves +
+          a.unresolves);
       return eventDelta || b.interestScore - a.interestScore;
     });
 }
@@ -123,7 +132,7 @@ function buildPayload(input) {
     dbPath: input.dbPath,
     warning: input.warning,
     instructions:
-      "Infer the reader's interests from TLDR newsletter interactions. Resolving after opening a link is strong positive evidence. Opening without resolving is medium positive evidence. Direct resolve without opening is negative or low-interest evidence. Use the newsletter title and fullDescription for every item, plus articleSnapshot fields when they exist because the article was opened and extracted. Return only reversible recommendations and avoid overfitting sparse samples.",
+      "Infer the reader's interests from TLDR newsletter interactions. Resolving after opening a link is strong positive evidence. Opening without resolving is medium positive evidence. Expanding the full newsletter description without opening is light positive evidence. Direct resolve without opening is negative or low-interest evidence. Use the newsletter title and fullDescription for every item, plus articleSnapshot fields when they exist because the article was opened and extracted. Return only reversible recommendations and avoid overfitting sparse samples.",
     filterRecommendationSchemaPath: FILTER_RECOMMENDATION_SCHEMA_PATH,
     desiredOutputSchema: {
       summary: "Brief human-readable interest profile.",
@@ -149,6 +158,7 @@ function buildPayload(input) {
           evidence: {
             interactionCount: 0,
             uniqueItemCount: 0,
+            descriptionExpands: 0,
             linkOpens: 0,
             resolvesAfterOpen: 0,
             directResolves: 0,
@@ -163,6 +173,9 @@ function buildPayload(input) {
     totals: {
       interactions: input.interactions.length,
       uniqueItems: items.length,
+      descriptionExpands: input.interactions.filter(
+        (row) => row.action === "description_expand",
+      ).length,
       linkOpens: input.interactions.filter((row) => row.action === "link_open")
         .length,
       resolvesAfterOpen: input.interactions.filter(
@@ -195,6 +208,7 @@ JSON schema path for future app integration: \`${payload.filterRecommendationSch
 
 - Interactions: ${payload.totals.interactions}
 - Unique items in context: ${payload.totals.uniqueItems}
+- Description expands: ${payload.totals.descriptionExpands}
 - Link opens: ${payload.totals.linkOpens}
 - Resolves after opening: ${payload.totals.resolvesAfterOpen}
 - Direct resolves: ${payload.totals.directResolves}

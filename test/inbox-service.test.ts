@@ -151,7 +151,7 @@ describe("Inbox service", () => {
     expect(reopened.snapshot?.urlKey).toBe(opened.snapshot?.urlKey);
   });
 
-  it("records item interactions for direct resolves and link-open-first resolves", async () => {
+  it("records description expands, direct resolves, and link-open-first resolves", async () => {
     const { service, repository } = await loadModules();
 
     await service.syncInbox();
@@ -161,7 +161,11 @@ describe("Inbox service", () => {
     )!;
     const directItem = firstEmail.items[0];
     const openedItem = firstEmail.items[1];
+    const expandedItem = firstEmail.items[2];
 
+    await service.recordDescriptionExpand(expandedItem.id, {
+      summaryLength: expandedItem.summary.length,
+    });
     await service.resolveItem(directItem.id, undefined, {
       layout: "desktop",
     });
@@ -192,7 +196,18 @@ describe("Inbox service", () => {
         interaction.itemId === openedItem.id &&
         interaction.action === "link_open",
     );
+    const descriptionExpand = interactions.find(
+      (interaction) =>
+        interaction.itemId === expandedItem.id &&
+        interaction.action === "description_expand",
+    );
 
+    expect(descriptionExpand).toMatchObject({
+      sourceVariant: "TLDR AI",
+      title: expandedItem.title,
+      fullDescription: expandedItem.summary,
+    });
+    expect(descriptionExpand?.metadataJson).toContain('"summaryLength"');
     expect(directResolve).toMatchObject({
       sourceVariant: "TLDR AI",
       title: directItem.title,

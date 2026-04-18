@@ -29,7 +29,10 @@ type UndoState = {
 } | null;
 
 type EmailItem = InboxPayload["emails"][number]["items"][number];
+type EmailRecord = InboxPayload["emails"][number];
 type GroupedSections = Array<[string, EmailItem[]]>;
+type SortDirection = "asc" | "desc";
+type ViewMode = "emails" | "flat";
 
 const SUMMARY_PREVIEW_LIMIT = 260;
 
@@ -80,13 +83,16 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
   const [sync, setSync] = useState(initialData.sync);
   const [undoState, setUndoState] = useState<UndoState>(null);
   const [resolvingIds, setResolvingIds] = useState<number[]>([]);
-  const pendingResolvedIds = useRef<Set<number>>(new Set());
+  const optimisticResolvedIds = useRef<Set<number>>(new Set());
   const openedItemIds = useRef<Set<number>>(new Set());
+  const trackedExpandedIds = useRef<Set<number>>(new Set());
   const [selectedEmailId, setSelectedEmailId] = useState<number | null>(null);
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [expandedSummaryIds, setExpandedSummaryIds] = useState<Set<number>>(
     () => new Set(),
   );
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [viewMode, setViewMode] = useState<ViewMode>("emails");
   const [hydrated, setHydrated] = useState(false);
   const [refreshPending, startRefreshTransition] = useTransition();
   const autoSyncTriggered = useRef(false);
@@ -94,8 +100,13 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
   const detailPanelRef = useRef<HTMLDivElement | null>(null);
 
   const visibleEmails = useMemo(
-    () => [...emails].sort((a, b) => a.receivedAt - b.receivedAt),
-    [emails],
+    () =>
+      [...emails].sort((a, b) =>
+        sortDirection === "asc"
+          ? a.receivedAt - b.receivedAt
+          : b.receivedAt - a.receivedAt,
+      ),
+    [emails, sortDirection],
   );
 
   const activeEmails = useMemo(
@@ -127,6 +138,27 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     [visibleEmails],
   );
 
+  const flatItems = useMemo(
+    () =>
+      activeEmails
+        .flatMap((email) =>
+          email.items
+            .filter((item) => item.resolvedAt == null)
+            .map((item) => ({
+              email,
+              item,
+            })),
+        )
+        .sort((a, b) => {
+          const dateDelta =
+            sortDirection === "asc"
+              ? a.email.receivedAt - b.email.receivedAt
+              : b.email.receivedAt - a.email.receivedAt;
+          return dateDelta || a.item.position - b.item.position;
+        }),
+    [activeEmails, sortDirection],
+  );
+
   const selectedEmail =
     visibleEmails.find((email) => email.id === selectedEmailId) ??
     visibleEmails[0] ??
@@ -156,9 +188,9 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     };
   }, [selectedEmail]);
 
-  const applyPendingResolutions = useCallback(
+  const applyOptimisticResolutions = useCallback(
     (nextEmails: InboxPayload["emails"]) => {
-      if (pendingResolvedIds.current.size === 0) {
+      if (optimisticResolvedIds.current.size === 0) {
         return nextEmails;
       }
 
@@ -166,10 +198,11 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
       return nextEmails.map((email) => {
         let changed = false;
         const nextItems = email.items.map((item) => {
-          if (
-            !pendingResolvedIds.current.has(item.id) ||
-            item.resolvedAt != null
-          ) {
+          if (!optimisticResolvedIds.current.has(item.id)) {
+            return item;
+          }
+
+          if (item.resolvedAt != null) {
             return item;
           }
 
@@ -191,9 +224,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
         return {
           ...email,
           completionState:
-            resolvedItems >= email.totalItems
-              ? "complete"
-              : email.completionState,
+            resolvedItems >= email.totalItems ? "complete" : "active",
           resolvedItems,
           items: nextItems,
         };
@@ -201,6 +232,22 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     },
     [],
   );
+
+  useEffect(() => {
+    if (optimisticResolvedIds.current.size === 0) {
+      return;
+    }
+
+    const nextOptimisticResolvedIds = new Set(optimisticResolvedIds.current);
+    for (const email of emails) {
+      for (const item of email.items) {
+        if (item.resolvedAt != null && nextOptimisticResolvedIds.has(item.id)) {
+          nextOptimisticResolvedIds.delete(item.id);
+        }
+      }
+    }
+    optimisticResolvedIds.current = nextOptimisticResolvedIds;
+  }, [emails]);
 
   useEffect(() => {
     setHydrated(true);
@@ -244,10 +291,10 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
 
   const syncInboxData = useCallback(async () => {
     const payload = await readJson<InboxPayload>("/api/inbox");
-    setEmails(applyPendingResolutions(payload.emails));
+    setEmails(applyOptimisticResolutions(payload.emails));
     setSync(payload.sync);
     return payload;
-  }, [applyPendingResolutions]);
+  }, [applyOptimisticResolutions]);
 
   function stopPolling() {
     if (pollTimer.current != null) {
@@ -299,7 +346,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
         method: "POST",
       });
       startTransition(() => {
-        setEmails(payload.emails);
+        setEmails(applyOptimisticResolutions(payload.emails));
         setSync(payload.sync);
       });
     } finally {
@@ -334,7 +381,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
             method: "POST",
           });
           startTransition(() => {
-            setEmails(applyPendingResolutions(payload.emails));
+            setEmails(applyOptimisticResolutions(payload.emails));
             setSync(payload.sync);
           });
         } finally {
@@ -343,7 +390,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
         }
       })();
     }
-  }, [applyPendingResolutions, initialData.shouldAutoSync, syncInboxData]);
+  }, [applyOptimisticResolutions, initialData.shouldAutoSync, syncInboxData]);
 
   function formatEmailDate(timestamp: number) {
     if (!hydrated) {
@@ -383,15 +430,15 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     };
   }
 
-  function trackLinkOpen(itemId: number, href: string) {
-    openedItemIds.current.add(itemId);
-
+  function sendInteraction(
+    itemId: number,
+    action: "description-expand" | "link-open",
+    metadata: Record<string, boolean | number | string | null> = {},
+  ) {
     const body = JSON.stringify({
-      metadata: getInteractionMetadata({
-        href,
-      }),
+      metadata: getInteractionMetadata(metadata),
     });
-    const url = `/api/items/${itemId}/link-open`;
+    const url = `/api/items/${itemId}/${action}`;
 
     if (navigator.sendBeacon) {
       navigator.sendBeacon(
@@ -413,6 +460,62 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     });
   }
 
+  function trackLinkOpen(itemId: number, href: string) {
+    openedItemIds.current.add(itemId);
+    sendInteraction(itemId, "link-open", {
+      href,
+    });
+  }
+
+  function trackDescriptionExpand(itemId: number, summaryLength: number) {
+    if (trackedExpandedIds.current.has(itemId)) {
+      return;
+    }
+
+    trackedExpandedIds.current.add(itemId);
+    sendInteraction(itemId, "description-expand", {
+      previewLength: SUMMARY_PREVIEW_LIMIT,
+      summaryLength,
+    });
+  }
+
+  function applyLocalResolution(
+    currentEmails: InboxPayload["emails"],
+    itemId: number,
+    resolvedAt: number,
+  ) {
+    return currentEmails.map((email) => {
+      let changed = false;
+      const nextItems = email.items.map((entry) => {
+        if (entry.id !== itemId || entry.resolvedAt != null) {
+          return entry;
+        }
+
+        changed = true;
+        return {
+          ...entry,
+          resolvedAt,
+        };
+      });
+
+      if (!changed) {
+        return email;
+      }
+
+      const resolvedItems = nextItems.filter(
+        (entry) => entry.resolvedAt != null,
+      ).length;
+
+      return {
+        ...email,
+        completionState:
+          resolvedItems >= email.totalItems ? "complete" : "active",
+        resolvedItems,
+        items: nextItems,
+      };
+    });
+  }
+
   async function resolveItem(itemId: number) {
     const item = emails
       .flatMap((email) => email.items)
@@ -421,11 +524,11 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
       return;
     }
 
-    if (pendingResolvedIds.current.has(itemId)) {
+    if (optimisticResolvedIds.current.has(itemId)) {
       return;
     }
 
-    pendingResolvedIds.current.add(itemId);
+    optimisticResolvedIds.current.add(itemId);
     setResolvingIds((current) =>
       current.includes(itemId) ? current : [...current, itemId],
     );
@@ -435,19 +538,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     });
 
     const previous = emails;
-    setEmails((current) =>
-      current.map((email) => ({
-        ...email,
-        items: email.items.map((entry) =>
-          entry.id === itemId
-            ? {
-                ...entry,
-                resolvedAt: Date.now(),
-              }
-            : entry,
-        ),
-      })),
-    );
+    setEmails((current) => applyLocalResolution(current, itemId, Date.now()));
 
     try {
       const payload = await readJson<{ emails: InboxPayload["emails"] }>(
@@ -464,13 +555,12 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
           method: "POST",
         },
       );
-      setEmails(applyPendingResolutions(payload.emails));
+      setEmails(applyOptimisticResolutions(payload.emails));
     } catch {
-      pendingResolvedIds.current.delete(itemId);
+      optimisticResolvedIds.current.delete(itemId);
       setEmails(previous);
       setUndoState(null);
     } finally {
-      pendingResolvedIds.current.delete(itemId);
       setResolvingIds((current) => current.filter((entry) => entry !== itemId));
       void syncInboxData();
     }
@@ -487,8 +577,8 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
         method: "POST",
       },
     );
-    pendingResolvedIds.current.delete(undoState.itemId);
-    setEmails(applyPendingResolutions(payload.emails));
+    optimisticResolvedIds.current.delete(undoState.itemId);
+    setEmails(applyOptimisticResolutions(payload.emails));
     setUndoState(null);
     await syncInboxData();
   }
@@ -510,7 +600,8 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     }
   }
 
-  function toggleSummary(itemId: number) {
+  function toggleSummary(itemId: number, summaryLength: number) {
+    let expanded = false;
     setExpandedSummaryIds((current) => {
       const next = new Set(current);
 
@@ -518,10 +609,233 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
         next.delete(itemId);
       } else {
         next.add(itemId);
+        expanded = true;
       }
 
       return next;
     });
+
+    if (expanded) {
+      trackDescriptionExpand(itemId, summaryLength);
+    }
+  }
+
+  function renderSortControls() {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--muted)]">
+          Date order
+        </span>
+        <button
+          className={cn(
+            "rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] transition",
+            sortDirection === "asc"
+              ? "border-[var(--accent)] bg-white text-[var(--accent-strong)]"
+              : "border-[var(--border)] bg-[var(--panel-strong)] text-[var(--muted)] hover:border-[var(--accent)]",
+          )}
+          onClick={() => setSortDirection("asc")}
+          type="button"
+        >
+          Oldest first
+        </button>
+        <button
+          className={cn(
+            "rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] transition",
+            sortDirection === "desc"
+              ? "border-[var(--accent)] bg-white text-[var(--accent-strong)]"
+              : "border-[var(--border)] bg-[var(--panel-strong)] text-[var(--muted)] hover:border-[var(--accent)]",
+          )}
+          onClick={() => setSortDirection("desc")}
+          type="button"
+        >
+          Newest first
+        </button>
+      </div>
+    );
+  }
+
+  function renderViewControls() {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--muted)]">
+          View
+        </span>
+        <button
+          className={cn(
+            "rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] transition",
+            viewMode === "emails"
+              ? "border-[var(--accent)] bg-white text-[var(--accent-strong)]"
+              : "border-[var(--border)] bg-[var(--panel-strong)] text-[var(--muted)] hover:border-[var(--accent)]",
+          )}
+          onClick={() => setViewMode("emails")}
+          type="button"
+        >
+          Email view
+        </button>
+        <button
+          className={cn(
+            "rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] transition",
+            viewMode === "flat"
+              ? "border-[var(--accent)] bg-white text-[var(--accent-strong)]"
+              : "border-[var(--border)] bg-[var(--panel-strong)] text-[var(--muted)] hover:border-[var(--accent)]",
+          )}
+          onClick={() => setViewMode("flat")}
+          type="button"
+        >
+          Flat links
+        </button>
+      </div>
+    );
+  }
+
+  function renderFlatItemCard(email: EmailRecord, item: EmailItem) {
+    const isResolving = resolvingIds.includes(item.id);
+    const href = item.finalUrl ?? item.canonicalUrl ?? item.trackedUrl;
+    const summaryExpanded = expandedSummaryIds.has(item.id);
+    const hasLongSummary = item.summary.length > SUMMARY_PREVIEW_LIMIT;
+    const visibleSummary =
+      hasLongSummary && !summaryExpanded
+        ? `${item.summary.slice(0, SUMMARY_PREVIEW_LIMIT).trimEnd()}…`
+        : item.summary;
+
+    return (
+      <article
+        key={item.id}
+        className="rounded-[22px] border border-white/80 bg-white/82 p-4 shadow-[0_18px_50px_rgba(79,53,20,0.08)] sm:p-5"
+      >
+        <div className="flex gap-3">
+          <Checkbox.Root
+            checked={false}
+            className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--panel-strong)] transition hover:border-[var(--accent)]"
+            disabled={isResolving}
+            onClick={() => void resolveItem(item.id)}
+          >
+            <span className="sr-only">Resolve {item.title}</span>
+            <Checkbox.Indicator>
+              <Check className="h-4 w-4 text-[var(--accent)]" />
+            </Checkbox.Indicator>
+          </Checkbox.Root>
+
+          <div className="min-w-0 flex-1 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusChip label={email.sourceVariant} tone="accent" />
+              <StatusChip label={item.section} tone="neutral" />
+              <StatusChip
+                label={formatEmailDate(email.receivedAt)}
+                tone="neutral"
+              />
+            </div>
+
+            <div className="text-xs uppercase tracking-[0.14em] text-[var(--muted)]">
+              From {email.subject}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <a
+                className="text-base font-semibold leading-snug transition hover:text-[var(--accent-strong)] hover:underline sm:text-lg"
+                href={href}
+                onClick={() => trackLinkOpen(item.id, href)}
+                rel="noreferrer noopener"
+                target="_blank"
+              >
+                {item.title}
+              </a>
+              <StatusChip
+                label={item.itemKind}
+                tone={item.itemKind === "sponsor" ? "warning" : "neutral"}
+              />
+              {item.readTimeText ? (
+                <StatusChip label={item.readTimeText} tone="neutral" />
+              ) : null}
+            </div>
+
+            <div className="rounded-[18px] border border-[var(--border)] bg-[var(--panel-strong)] px-4 py-3">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
+                Email description
+              </div>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--muted)]">
+                {visibleSummary}
+              </p>
+              {hasLongSummary ? (
+                <button
+                  className="mt-3 inline-flex rounded-full border border-[var(--border)] bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--accent-strong)] transition hover:border-[var(--accent)]"
+                  onClick={() => toggleSummary(item.id, item.summary.length)}
+                  type="button"
+                >
+                  {summaryExpanded ? "Show less" : "Show full description"}
+                </button>
+              ) : null}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--muted)]">
+              <a
+                className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--panel-strong)] px-3 py-1.5 font-medium transition hover:border-[var(--accent)]"
+                href={href}
+                onClick={() => trackLinkOpen(item.id, href)}
+                rel="noreferrer noopener"
+                target="_blank"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                Open link
+              </a>
+              {isResolving ? (
+                <span className="inline-flex items-center gap-2 rounded-full bg-[var(--accent-soft)] px-3 py-1 text-[var(--accent-strong)]">
+                  <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                  Marking complete…
+                </span>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </article>
+    );
+  }
+
+  function renderFlatView() {
+    return (
+      <div className="rounded-[30px] border border-[var(--border)] bg-[var(--panel)] backdrop-blur">
+        <div className="flex flex-col gap-4 border-b border-[var(--border)] px-5 py-4 md:px-6">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="text-sm font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
+                Flat links
+              </div>
+              <div className="text-sm text-[var(--muted)]">
+                One continuous queue of unresolved links, sorted by email date
+                without making you enter each issue first.
+              </div>
+            </div>
+            <div className="rounded-full bg-white px-3 py-1 text-sm font-medium shadow-sm">
+              {flatItems.length}
+            </div>
+          </div>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            {renderSortControls()}
+            {renderViewControls()}
+          </div>
+        </div>
+
+        <div className="space-y-4 p-4 md:p-5">
+          {flatItems.length === 0 ? (
+            <div className="rounded-[24px] border border-dashed border-[var(--border)] bg-white/65 p-8 text-center">
+              <MailCheck className="mx-auto h-10 w-10 text-[var(--accent)]" />
+              <h2 className="mt-4 font-[var(--font-source-serif)] text-2xl">
+                {sync.active
+                  ? "Building your flat queue…"
+                  : "Flat queue cleared"}
+              </h2>
+              <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--muted)]">
+                {sync.active
+                  ? "Unread TLDR issues are still being parsed. New links will appear here as soon as they land."
+                  : "All tracked links are resolved. Switch back to email view if you want to review completed issues."}
+              </p>
+            </div>
+          ) : null}
+
+          {flatItems.map(({ email, item }) => renderFlatItemCard(email, item))}
+        </div>
+      </div>
+    );
   }
 
   function renderEmailDetail() {
@@ -700,7 +1014,12 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                                   {hasLongSummary ? (
                                     <button
                                       className="mt-3 inline-flex rounded-full border border-[var(--border)] bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--accent-strong)] transition hover:border-[var(--accent)]"
-                                      onClick={() => toggleSummary(item.id)}
+                                      onClick={() =>
+                                        toggleSummary(
+                                          item.id,
+                                          item.summary.length,
+                                        )
+                                      }
                                       type="button"
                                     >
                                       {summaryExpanded
@@ -886,6 +1205,10 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                   tone="neutral"
                 />
               </div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+                {renderSortControls()}
+                {renderViewControls()}
+              </div>
             </div>
             <div className="flex items-start justify-start md:justify-end">
               <button
@@ -950,97 +1273,109 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
           </div>
         </section>
 
-        <section className="grid items-start gap-6 lg:grid-cols-[minmax(320px,0.8fr)_minmax(0,1.2fr)]">
-          <div
-            className={cn(
-              "rounded-[30px] border border-[var(--border)] bg-[var(--panel)] backdrop-blur",
-              mobileDetailOpen && "hidden lg:block",
-            )}
-          >
-            <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4 md:px-6">
-              <div>
-                <div className="text-sm font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
-                  Emails
-                </div>
-                <div className="text-sm text-[var(--muted)]">
-                  Active emails stay at the top. Completed emails move to the
-                  bottom.
-                </div>
-              </div>
-              <div className="rounded-full bg-white px-3 py-1 text-sm font-medium shadow-sm">
-                {visibleEmails.length}
-              </div>
-            </div>
-
-            <div className="space-y-4 p-4 md:p-5">
-              {visibleEmails.length === 0 ? (
-                <div className="rounded-[24px] border border-dashed border-[var(--border)] bg-white/65 p-8 text-center">
-                  <MailCheck className="mx-auto h-10 w-10 text-[var(--accent)]" />
-                  <h2 className="mt-4 font-[var(--font-source-serif)] text-2xl">
-                    {sync.active
-                      ? "Fetching unread newsletters…"
-                      : "Inbox cleared"}
-                  </h2>
-                  <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--muted)]">
-                    {sync.active
-                      ? "The app is pulling unread TLDR issues and will populate this view as soon as parsing completes."
-                      : "All tracked TLDR items are resolved. Refresh to pick up new unread issues."}
-                  </p>
-                </div>
-              ) : null}
-
-              {activeEmails.length > 0 ? (
-                <section className="space-y-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
-                      Active queue
+        <section
+          className={cn(
+            "grid items-start gap-6",
+            viewMode === "emails" &&
+              "lg:grid-cols-[minmax(320px,0.8fr)_minmax(0,1.2fr)]",
+          )}
+        >
+          {viewMode === "emails" ? (
+            <>
+              <div
+                className={cn(
+                  "rounded-[30px] border border-[var(--border)] bg-[var(--panel)] backdrop-blur",
+                  mobileDetailOpen && "hidden lg:block",
+                )}
+              >
+                <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4 md:px-6">
+                  <div>
+                    <div className="text-sm font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
+                      Emails
                     </div>
-                    <div className="text-xs text-[var(--muted)]">
-                      {activeEmails.length} email
-                      {activeEmails.length === 1 ? "" : "s"}
+                    <div className="text-sm text-[var(--muted)]">
+                      Active emails stay at the top. Completed emails move to
+                      the bottom.
                     </div>
                   </div>
-                  {activeEmails.map(renderEmailCard)}
-                </section>
-              ) : visibleEmails.length > 0 ? (
-                <div className="rounded-[24px] border border-dashed border-[var(--border)] bg-white/65 p-6 text-center">
-                  <MailCheck className="mx-auto h-8 w-8 text-[var(--accent)]" />
-                  <h2 className="mt-3 font-[var(--font-source-serif)] text-xl">
-                    Active queue cleared
-                  </h2>
-                  <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--muted)]">
-                    Every parsed email is resolved. Completed issues stay below
-                    for reference.
-                  </p>
-                </div>
-              ) : null}
-
-              {completedEmails.length > 0 ? (
-                <section className="space-y-4 border-t border-[var(--border)] pt-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
-                      Completed emails
-                    </div>
-                    <div className="text-xs text-[var(--muted)]">
-                      {completedEmails.length} email
-                      {completedEmails.length === 1 ? "" : "s"}
-                    </div>
+                  <div className="rounded-full bg-white px-3 py-1 text-sm font-medium shadow-sm">
+                    {visibleEmails.length}
                   </div>
-                  {completedEmails.map(renderEmailCard)}
-                </section>
-              ) : null}
-            </div>
-          </div>
+                </div>
 
-          <div
-            ref={detailPanelRef}
-            className={cn(
-              "rounded-[30px] border border-[var(--border)] bg-[var(--panel)] backdrop-blur",
-              !mobileDetailOpen && "hidden lg:block",
-            )}
-          >
-            {renderEmailDetail()}
-          </div>
+                <div className="space-y-4 p-4 md:p-5">
+                  {visibleEmails.length === 0 ? (
+                    <div className="rounded-[24px] border border-dashed border-[var(--border)] bg-white/65 p-8 text-center">
+                      <MailCheck className="mx-auto h-10 w-10 text-[var(--accent)]" />
+                      <h2 className="mt-4 font-[var(--font-source-serif)] text-2xl">
+                        {sync.active
+                          ? "Fetching unread newsletters…"
+                          : "Inbox cleared"}
+                      </h2>
+                      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--muted)]">
+                        {sync.active
+                          ? "The app is pulling unread TLDR issues and will populate this view as soon as parsing completes."
+                          : "All tracked TLDR items are resolved. Refresh to pick up new unread issues."}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {activeEmails.length > 0 ? (
+                    <section className="space-y-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
+                          Active queue
+                        </div>
+                        <div className="text-xs text-[var(--muted)]">
+                          {activeEmails.length} email
+                          {activeEmails.length === 1 ? "" : "s"}
+                        </div>
+                      </div>
+                      {activeEmails.map(renderEmailCard)}
+                    </section>
+                  ) : visibleEmails.length > 0 ? (
+                    <div className="rounded-[24px] border border-dashed border-[var(--border)] bg-white/65 p-6 text-center">
+                      <MailCheck className="mx-auto h-8 w-8 text-[var(--accent)]" />
+                      <h2 className="mt-3 font-[var(--font-source-serif)] text-xl">
+                        Active queue cleared
+                      </h2>
+                      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--muted)]">
+                        Every parsed email is resolved. Completed issues stay
+                        below for reference.
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {completedEmails.length > 0 ? (
+                    <section className="space-y-4 border-t border-[var(--border)] pt-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
+                          Completed emails
+                        </div>
+                        <div className="text-xs text-[var(--muted)]">
+                          {completedEmails.length} email
+                          {completedEmails.length === 1 ? "" : "s"}
+                        </div>
+                      </div>
+                      {completedEmails.map(renderEmailCard)}
+                    </section>
+                  ) : null}
+                </div>
+              </div>
+
+              <div
+                ref={detailPanelRef}
+                className={cn(
+                  "rounded-[30px] border border-[var(--border)] bg-[var(--panel)] backdrop-blur",
+                  !mobileDetailOpen && "hidden lg:block",
+                )}
+              >
+                {renderEmailDetail()}
+              </div>
+            </>
+          ) : (
+            renderFlatView()
+          )}
         </section>
 
         {undoState ? (

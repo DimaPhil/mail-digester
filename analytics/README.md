@@ -9,6 +9,8 @@ the sample is too small and avoid strong filtering recommendations.
 
 The current scoring model treats behavior as preference evidence:
 
+- `description_expand`: weak positive signal. The short blurb was not enough,
+  but the user still stayed in the inbox instead of opening the article.
 - `link_open`: positive signal. The item was interesting enough to open.
 - `resolve` with `resolve_mode = after_open`: strong positive signal. The item
   was opened and then cleared.
@@ -52,6 +54,8 @@ cached `article_snapshots` data when available:
 This means unresolved-via-click and direct-resolve behaviors are both useful for
 later filtering analysis. Direct resolves always keep the newsletter title and
 description; opened items can additionally contribute article text.
+Description expansions add a middle-ground signal when the user wanted more
+context from the newsletter itself but did not open the destination link.
 
 ## Interest Analysis
 

@@ -10,7 +10,11 @@ import {
 import type { ParsedDigestEmail } from "@/lib/digest/types";
 import { nowTs } from "@/lib/utils";
 
-export type ItemInteractionAction = "link_open" | "resolve" | "unresolve";
+export type ItemInteractionAction =
+  | "description_expand"
+  | "link_open"
+  | "resolve"
+  | "unresolve";
 
 export type ItemInteractionMetadata = Record<
   string,

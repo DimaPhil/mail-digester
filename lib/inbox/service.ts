@@ -287,6 +287,16 @@ export async function recordLinkOpen(
   };
 }
 
+export async function recordDescriptionExpand(
+  itemId: number,
+  metadata: ItemInteractionMetadata = {},
+) {
+  await recordItemInteraction(itemId, "description_expand", metadata);
+  return {
+    ok: true,
+  };
+}
+
 export async function resolveItem(
   itemId: number,
   services = createInboxServices(),

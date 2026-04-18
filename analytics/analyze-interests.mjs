@@ -47,6 +47,7 @@ const STOPWORDS = new Set([
 ]);
 
 const MODEL = {
+  descriptionExpandWeight: 0.75,
   linkOpenWeight: 1.5,
   afterOpenResolveWeight: 4,
   directResolveWeight: -2,
@@ -91,6 +92,10 @@ function itemKey(row) {
 }
 
 function interactionScore(row) {
+  if (row.action === "description_expand") {
+    return MODEL.descriptionExpandWeight;
+  }
+
   if (row.action === "link_open") {
     return MODEL.linkOpenWeight;
   }
@@ -123,6 +128,7 @@ function buildItemSignals(interactions) {
       fullDescription: row.fullDescription,
       canonicalUrl: row.canonicalUrl,
       finalUrl: row.finalUrl,
+      descriptionExpands: 0,
       linkOpens: 0,
       directResolves: 0,
       afterOpenResolves: 0,
@@ -136,7 +142,9 @@ function buildItemSignals(interactions) {
     current.lastSeenAt = Math.max(current.lastSeenAt, row.createdAt);
     current.score += interactionScore(row);
 
-    if (row.action === "link_open") {
+    if (row.action === "description_expand") {
+      current.descriptionExpands += 1;
+    } else if (row.action === "link_open") {
       current.linkOpens += 1;
     } else if (row.action === "unresolve") {
       current.unresolves += 1;
@@ -157,6 +165,7 @@ function emptyAggregate(key) {
     key,
     itemCount: 0,
     eventCount: 0,
+    descriptionExpands: 0,
     linkOpens: 0,
     directResolves: 0,
     afterOpenResolves: 0,
@@ -175,7 +184,9 @@ function aggregateBy(interactions, keyForRow) {
       aggregate.eventCount += 1;
       aggregate.score += interactionScore(row);
 
-      if (row.action === "link_open") {
+      if (row.action === "description_expand") {
+        aggregate.descriptionExpands += 1;
+      } else if (row.action === "link_open") {
         aggregate.linkOpens += 1;
       } else if (row.action === "unresolve") {
         aggregate.unresolves += 1;
@@ -245,6 +256,9 @@ function buildAnalysis({ dbPath, interactions, warning, minSamples, top }) {
     },
     model: MODEL,
     totals: {
+      descriptionExpands: interactions.filter(
+        (row) => row.action === "description_expand",
+      ).length,
       linkOpens: interactions.filter((row) => row.action === "link_open")
         .length,
       directResolves: interactions.filter(
@@ -278,7 +292,7 @@ function buildAnalysis({ dbPath, interactions, warning, minSamples, top }) {
         type: "promote",
         signal: signal.key,
         reason:
-          "Positive score from link opens and/or resolves after opening the article.",
+          "Positive score from description expands, link opens, and/or resolves after opening the article.",
         score: signal.score,
         evidenceCount: signal.eventCount,
       })),
@@ -304,11 +318,11 @@ function formatAggregateTable(items) {
   }
 
   return [
-    "| Signal | Score | Items | Opens | After-open resolves | Direct resolves |",
-    "| --- | ---: | ---: | ---: | ---: | ---: |",
+    "| Signal | Score | Items | Description expands | Opens | After-open resolves | Direct resolves |",
+    "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ...items.map(
       (item) =>
-        `| ${item.key} | ${formatScore(item.score)} | ${item.itemCount} | ${item.linkOpens} | ${item.afterOpenResolves} | ${item.directResolves} |`,
+        `| ${item.key} | ${formatScore(item.score)} | ${item.itemCount} | ${item.descriptionExpands} | ${item.linkOpens} | ${item.afterOpenResolves} | ${item.directResolves} |`,
     ),
   ].join("\n");
 }
@@ -321,7 +335,7 @@ function formatItemList(items) {
   return items
     .map(
       (item, index) =>
-        `${index + 1}. **${item.title}** (${item.sourceVariant}, ${item.section}) - score ${formatScore(item.score)}, opens ${item.linkOpens}, after-open resolves ${item.afterOpenResolves}, direct resolves ${item.directResolves}`,
+        `${index + 1}. **${item.title}** (${item.sourceVariant}, ${item.section}) - score ${formatScore(item.score)}, description expands ${item.descriptionExpands}, opens ${item.linkOpens}, after-open resolves ${item.afterOpenResolves}, direct resolves ${item.directResolves}`,
     )
     .join("\n");
 }
@@ -342,15 +356,17 @@ ${analysis.warning ? `Warning: ${analysis.warning}\n` : ""}## Readiness
 
 ## Scoring Model
 
+- Description expanded: +${analysis.model.descriptionExpandWeight}
 - Link opened: +${analysis.model.linkOpenWeight}
 - Resolved after opening link: +${analysis.model.afterOpenResolveWeight}
 - Resolved directly without opening: ${analysis.model.directResolveWeight}
 - Unresolved via undo: +${analysis.model.unresolveWeight}
 
-Interpretation: opening an item before resolving is a strong interest signal; resolving directly is a low-interest signal because it means the item was cleared without visiting the article.
+Interpretation: expanding the newsletter description is a light interest signal, opening an item before resolving is a strong interest signal, and resolving directly is a low-interest signal because it means the item was cleared without visiting the article.
 
 ## Totals
 
+- Description expands: ${analysis.totals.descriptionExpands}
 - Link opens: ${analysis.totals.linkOpens}
 - Resolves after opening: ${analysis.totals.afterOpenResolves}
 - Direct resolves: ${analysis.totals.directResolves}
