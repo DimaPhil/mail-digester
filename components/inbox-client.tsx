@@ -94,6 +94,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [viewMode, setViewMode] = useState<ViewMode>("emails");
   const [hydrated, setHydrated] = useState(false);
+  const [forceFullResync, setForceFullResync] = useState(false);
   const [refreshPending, startRefreshTransition] = useTransition();
   const autoSyncTriggered = useRef(false);
   const pollTimer = useRef<number | null>(null);
@@ -322,12 +323,16 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     };
   }, []);
 
-  async function triggerSync(reason: "startup" | "manual") {
+  async function triggerSync(
+    reason: "startup" | "manual",
+    options: { forceFullResync?: boolean } = {},
+  ) {
     if (reason === "startup" && autoSyncTriggered.current) {
       return;
     }
 
     autoSyncTriggered.current = true;
+    const forceResync = options.forceFullResync === true;
     setSync((current) => ({
       ...current,
       active: true,
@@ -336,13 +341,21 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
       message:
         reason === "startup"
           ? "Starting inbox sync for unread TLDR newsletters…"
-          : "Refreshing unread TLDR newsletters…",
+          : forceResync
+            ? "Refreshing all unread TLDR newsletters from scratch…"
+            : "Refreshing unread TLDR newsletters since the last sync…",
     }));
 
     startPolling();
 
     try {
       const payload = await readJson<InboxPayload>("/api/sync", {
+        body: JSON.stringify({
+          forceFullResync: forceResync,
+        }),
+        headers: {
+          "Content-Type": "application/json",
+        },
         method: "POST",
       });
       startTransition(() => {
@@ -378,6 +391,12 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
       void (async () => {
         try {
           const payload = await readJson<InboxPayload>("/api/sync", {
+            body: JSON.stringify({
+              forceFullResync: false,
+            }),
+            headers: {
+              "Content-Type": "application/json",
+            },
             method: "POST",
           });
           startTransition(() => {
@@ -1211,23 +1230,46 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
               </div>
             </div>
             <div className="flex items-start justify-start md:justify-end">
-              <button
-                className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-white px-4 py-3 text-sm font-medium shadow-[0_12px_30px_rgba(32,23,13,0.08)] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={refreshPending || sync.active}
-                onClick={() => {
-                  startRefreshTransition(() => {
-                    void triggerSync("manual");
-                  });
-                }}
-                type="button"
-              >
-                {refreshPending || sync.active ? (
-                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCcw className="h-4 w-4" />
-                )}
-                {sync.active ? "Syncing inbox…" : "Refresh unread mail"}
-              </button>
+              <div className="flex flex-col items-start gap-3">
+                <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-[var(--muted)]">
+                  <Checkbox.Root
+                    checked={forceFullResync}
+                    className="inline-flex h-5 w-5 items-center justify-center rounded border border-[var(--border)] bg-white transition hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={refreshPending || sync.active}
+                    onCheckedChange={(checked) =>
+                      setForceFullResync(checked === true)
+                    }
+                  >
+                    <Checkbox.Indicator>
+                      <Check className="h-3.5 w-3.5 text-[var(--accent)]" />
+                    </Checkbox.Indicator>
+                  </Checkbox.Root>
+                  Force full resync
+                </label>
+                <button
+                  className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-white px-4 py-3 text-sm font-medium shadow-[0_12px_30px_rgba(32,23,13,0.08)] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={refreshPending || sync.active}
+                  onClick={() => {
+                    startRefreshTransition(() => {
+                      void triggerSync("manual", {
+                        forceFullResync,
+                      });
+                    });
+                  }}
+                  type="button"
+                >
+                  {refreshPending || sync.active ? (
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCcw className="h-4 w-4" />
+                  )}
+                  {sync.active
+                    ? "Syncing inbox…"
+                    : forceFullResync
+                      ? "Resync all unread mail"
+                      : "Sync new unread mail"}
+                </button>
+              </div>
             </div>
           </div>
           <div className="border-t border-[var(--border)] bg-white/55 px-4 py-4 sm:px-6 md:px-8">

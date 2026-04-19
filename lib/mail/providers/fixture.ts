@@ -1,4 +1,5 @@
 import type {
+  ListMailOptions,
   MailMessageRef,
   MailProvider,
   ProviderMessage,
@@ -77,8 +78,13 @@ const FIXTURE_MESSAGES: ProviderMessage[] = [
 ];
 
 export class FixtureMailProvider implements MailProvider {
-  async listUnreadCandidates(): Promise<MailMessageRef[]> {
-    return FIXTURE_MESSAGES.map((message) => ({
+  async listUnreadCandidates(
+    options: ListMailOptions = {},
+  ): Promise<MailMessageRef[]> {
+    return FIXTURE_MESSAGES.filter(
+      (message) =>
+        options.afterTs == null || message.receivedAt > options.afterTs,
+    ).map((message) => ({
       id: message.id,
       threadId: message.threadId,
     }));

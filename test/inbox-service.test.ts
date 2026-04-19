@@ -41,12 +41,13 @@ describe("Inbox service", () => {
     const payload = await service.getInboxPayload();
 
     expect(payload.sync.status).toBe("idle");
+    expect(payload.sync.lastSuccessfulSyncStartedAt).not.toBeNull();
     expect(payload.emails).toHaveLength(2);
     expect(payload.emails[0].items.length).toBeGreaterThan(0);
     expect(payload.shouldAutoSync).toBe(false);
   });
 
-  it("skips startup auto-sync when the newest unread message is already stored", async () => {
+  it("skips startup auto-sync when there are no unread messages after the last successful sync", async () => {
     const { service, repository } = await loadModules();
 
     await service.syncInbox();
@@ -55,21 +56,33 @@ describe("Inbox service", () => {
       phase: "ready",
       message: "Old sync metadata",
       active: false,
-      lastFinishedAt: Date.parse("2026-01-01T00:00:00Z"),
+      lastFinishedAt: Date.parse("2026-04-11T00:00:00Z"),
+      lastSuccessfulSyncStartedAt: Date.parse("2026-04-11T00:00:00Z"),
     });
 
     const payload = await service.getInboxPayload();
     expect(payload.shouldAutoSync).toBe(false);
   });
 
-  it("requests startup auto-sync when Gmail has a newer unread message", async () => {
-    const { service } = await loadModules();
+  it("requests startup auto-sync when Gmail has unread mail after the last successful sync", async () => {
+    const { service, repository } = await loadModules();
 
     await service.syncInbox();
+    const lastSuccessfulSyncStartedAt = Date.parse("2026-04-09T12:00:00Z");
+    await repository.setSyncState({
+      status: "idle",
+      phase: "ready",
+      message: "Ready",
+      active: false,
+      lastSuccessfulSyncStartedAt,
+    });
 
     const payload = await service.getInboxPayload({
       mailProvider: {
-        listUnreadCandidates: async () => [{ id: "fixture-new-001" }],
+        listUnreadCandidates: async (options) => {
+          expect(options?.afterTs).toBe(lastSuccessfulSyncStartedAt);
+          return [{ id: "fixture-new-001" }];
+        },
         getMessage: async () => {
           throw new Error("Not used in startup freshness checks");
         },
@@ -118,6 +131,7 @@ describe("Inbox service", () => {
       lastError: "old failure",
       lastStartedAt: Date.parse("2026-01-01T00:00:00Z"),
       lastFinishedAt: Date.parse("2026-01-01T00:01:00Z"),
+      lastSuccessfulSyncStartedAt: Date.parse("2026-01-01T00:00:00Z"),
     });
 
     await repository.setSyncState({
@@ -127,12 +141,77 @@ describe("Inbox service", () => {
       lastError: null,
       lastStartedAt: null,
       lastFinishedAt: null,
+      lastSuccessfulSyncStartedAt: null,
     });
 
     const sync = await repository.getSyncState();
     expect(sync.lastError).toBeNull();
     expect(sync.lastStartedAt).toBeNull();
     expect(sync.lastFinishedAt).toBeNull();
+    expect(sync.lastSuccessfulSyncStartedAt).toBeNull();
+  });
+
+  it("only syncs unread messages newer than the last successful sync unless forced", async () => {
+    const { service, repository } = await loadModules();
+    const lastSuccessfulSyncStartedAt = Date.parse("2026-04-10T00:00:00Z");
+    const listUnreadCandidates = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: "incremental-1" }])
+      .mockResolvedValueOnce([{ id: "incremental-1" }, { id: "full-1" }]);
+    const getMessage = vi.fn(async (messageId: string) =>
+      providerMessageFromFixture({
+        id: messageId,
+        from: "TLDR <dan@tldrnewsletter.com>",
+        subject: `Issue ${messageId}`,
+        receivedAt: Date.parse("2026-04-11T08:00:00Z"),
+        htmlBody: `
+          <html><body>
+            <p>HEADLINES</p>
+            <div>
+              <a href="https://tracking.tldrnewsletter.com/CL0/https:%2F%2Fexample.com%2F${messageId}/1/token">${messageId} article (2 minute read)</a>
+              <span>Summary text that is long enough to keep this item eligible for parsing in the sync flow.</span>
+            </div>
+          </body></html>
+        `,
+      }),
+    );
+
+    await repository.setSyncState({
+      status: "idle",
+      phase: "ready",
+      message: "Ready",
+      active: false,
+      lastSuccessfulSyncStartedAt,
+    });
+
+    await service.syncInbox({
+      mailProvider: {
+        listUnreadCandidates,
+        getMessage,
+        markMessageRead: async () => undefined,
+      },
+    });
+
+    expect(listUnreadCandidates).toHaveBeenNthCalledWith(1, {
+      afterTs: lastSuccessfulSyncStartedAt,
+    });
+
+    await service.syncInbox(
+      {
+        mailProvider: {
+          listUnreadCandidates,
+          getMessage,
+          markMessageRead: async () => undefined,
+        },
+      },
+      {
+        forceFullResync: true,
+      },
+    );
+
+    expect(listUnreadCandidates).toHaveBeenNthCalledWith(2, {
+      afterTs: null,
+    });
   });
 
   it("opens an item, extracts article content, and reuses the cached snapshot", async () => {

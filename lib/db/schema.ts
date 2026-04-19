@@ -127,6 +127,9 @@ export const syncState = sqliteTable("sync_state", {
   active: integer("active", { mode: "boolean" }).notNull().default(false),
   lastStartedAt: integer("last_started_at", { mode: "number" }),
   lastFinishedAt: integer("last_finished_at", { mode: "number" }),
+  lastSuccessfulSyncStartedAt: integer("last_successful_sync_started_at", {
+    mode: "number",
+  }),
   lastError: text("last_error"),
   updatedAt: integer("updated_at", { mode: "number" }).notNull(),
 });

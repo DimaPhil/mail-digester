@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { GMAIL_TLDR_QUERY, GWS_BINARY } from "@/lib/config";
 import { parseSender } from "@/lib/digest/tldr";
 import type {
+  ListMailOptions,
   MailMessageRef,
   MailProvider,
   ProviderMessage,
@@ -76,9 +77,15 @@ async function runGws<T>(args: string[]) {
 }
 
 export class GmailGwsProvider implements MailProvider {
-  async listUnreadCandidates(): Promise<MailMessageRef[]> {
+  async listUnreadCandidates(
+    options: ListMailOptions = {},
+  ): Promise<MailMessageRef[]> {
     const messages: MailMessageRef[] = [];
     let pageToken: string | undefined;
+    const query =
+      options.afterTs != null
+        ? `${GMAIL_TLDR_QUERY} after:${Math.floor(options.afterTs / 1000)}`
+        : GMAIL_TLDR_QUERY;
 
     do {
       const response = await runGws<GmailListResponse>([
@@ -89,7 +96,7 @@ export class GmailGwsProvider implements MailProvider {
         "--params",
         JSON.stringify({
           userId: "me",
-          q: GMAIL_TLDR_QUERY,
+          q: query,
           maxResults: 100,
           pageToken,
         }),

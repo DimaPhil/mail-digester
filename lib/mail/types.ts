@@ -3,6 +3,10 @@ export type MailMessageRef = {
   threadId?: string;
 };
 
+export type ListMailOptions = {
+  afterTs?: number | null;
+};
+
 export type MessageHeader = {
   name: string;
   value: string;
@@ -23,7 +27,7 @@ export type ProviderMessage = {
 };
 
 export interface MailProvider {
-  listUnreadCandidates(): Promise<MailMessageRef[]>;
+  listUnreadCandidates(options?: ListMailOptions): Promise<MailMessageRef[]>;
   getMessage(messageId: string): Promise<ProviderMessage>;
   markMessageRead(messageId: string): Promise<void>;
 }

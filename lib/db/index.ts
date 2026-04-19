@@ -150,10 +150,25 @@ function initializeSchema() {
       active INTEGER NOT NULL DEFAULT 0,
       last_started_at INTEGER,
       last_finished_at INTEGER,
+      last_successful_sync_started_at INTEGER,
       last_error TEXT,
       updated_at INTEGER NOT NULL
     );
   `);
+
+  const syncStateColumns = instance.sqlite
+    .prepare("PRAGMA table_info(sync_state)")
+    .all() as Array<{ name: string }>;
+  const hasLastSuccessfulSyncStartedAt = syncStateColumns.some(
+    (column) => column.name === "last_successful_sync_started_at",
+  );
+
+  if (!hasLastSuccessfulSyncStartedAt) {
+    instance.sqlite.exec(`
+      ALTER TABLE sync_state
+      ADD COLUMN last_successful_sync_started_at INTEGER
+    `);
+  }
 
   instance.sqlite
     .prepare(

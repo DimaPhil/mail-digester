@@ -66,6 +66,7 @@ export type SyncStateRecord = {
   active: boolean;
   lastStartedAt: number | null;
   lastFinishedAt: number | null;
+  lastSuccessfulSyncStartedAt: number | null;
   lastError: string | null;
   updatedAt: number;
 };
@@ -98,6 +99,10 @@ export async function setSyncState(
         input.lastFinishedAt === undefined
           ? current.lastFinishedAt
           : input.lastFinishedAt,
+      lastSuccessfulSyncStartedAt:
+        input.lastSuccessfulSyncStartedAt === undefined
+          ? current.lastSuccessfulSyncStartedAt
+          : input.lastSuccessfulSyncStartedAt,
       lastError:
         input.lastError === undefined ? current.lastError : input.lastError,
       updatedAt: nextUpdatedAt,

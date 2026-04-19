@@ -29,6 +29,10 @@ export type InboxServices = {
   mailProvider: MailProvider;
 };
 
+export type SyncInboxOptions = {
+  forceFullResync?: boolean;
+};
+
 export function createInboxServices(
   overrides: Partial<InboxServices> = {},
 ): InboxServices {
@@ -44,22 +48,14 @@ export function createInboxServices(
 }
 
 async function shouldAutoSyncInbox(
-  newestStoredMessageId: string | null,
+  lastSuccessfulSyncStartedAt: number | null,
   services: InboxServices,
 ) {
   try {
-    const refs = await services.mailProvider.listUnreadCandidates();
-    const latestUnreadRef = refs[0];
-
-    if (!latestUnreadRef) {
-      return false;
-    }
-
-    if (!newestStoredMessageId) {
-      return true;
-    }
-
-    return latestUnreadRef.id !== newestStoredMessageId;
+    const refs = await services.mailProvider.listUnreadCandidates({
+      afterTs: lastSuccessfulSyncStartedAt,
+    });
+    return refs.length > 0;
   } catch {
     // Keep rendering local data if the provider check is temporarily unavailable.
     return false;
@@ -68,10 +64,9 @@ async function shouldAutoSyncInbox(
 
 export async function getInboxPayload(services = createInboxServices()) {
   const [emails, sync] = await Promise.all([listInboxEmails(), getSyncState()]);
-  const newestStoredMessageId = emails[0]?.providerMessageId ?? null;
   const shouldAutoSync = sync.active
     ? false
-    : await shouldAutoSyncInbox(newestStoredMessageId, services);
+    : await shouldAutoSyncInbox(sync.lastSuccessfulSyncStartedAt, services);
 
   return {
     emails,
@@ -80,30 +75,52 @@ export async function getInboxPayload(services = createInboxServices()) {
   };
 }
 
-export async function syncInbox(services = createInboxServices()) {
+export async function syncInbox(
+  services = createInboxServices(),
+  options: SyncInboxOptions = {},
+) {
   if (syncPromise) {
     return syncPromise;
   }
 
   syncPromise = (async () => {
+    const syncStartedAt = nowTs();
+    const currentSyncState = await getSyncState();
+    const forceFullResync = options.forceFullResync === true;
+    const incrementalCutoff = forceFullResync
+      ? null
+      : currentSyncState.lastSuccessfulSyncStartedAt;
+
     await setSyncState({
       status: "running",
       phase: "listing",
-      message: "Fetching unread TLDR newsletters from Gmail…",
+      message:
+        incrementalCutoff == null
+          ? forceFullResync
+            ? "Running full unread newsletter resync from Gmail…"
+            : "Fetching unread TLDR newsletters from Gmail…"
+          : "Fetching unread TLDR newsletters added since the last successful sync…",
       discoveredEmails: 0,
       processedEmails: 0,
       active: true,
-      lastStartedAt: nowTs(),
+      lastStartedAt: syncStartedAt,
       lastError: null,
     });
 
     try {
-      const refs = await services.mailProvider.listUnreadCandidates();
+      const refs = await services.mailProvider.listUnreadCandidates({
+        afterTs: incrementalCutoff,
+      });
 
       await setSyncState({
         status: "running",
         phase: "fetching",
-        message: `Found ${refs.length} unread candidate newsletters. Loading message bodies…`,
+        message:
+          refs.length === 0
+            ? incrementalCutoff == null
+              ? "No unread candidate newsletters found."
+              : "No new unread candidate newsletters found since the last successful sync."
+            : `Found ${refs.length} unread candidate newsletter${refs.length === 1 ? "" : "s"}. Loading message bodies…`,
         discoveredEmails: refs.length,
         processedEmails: 0,
         active: true,
@@ -169,12 +186,15 @@ export async function syncInbox(services = createInboxServices()) {
         phase: "ready",
         message:
           refs.length === 0
-            ? "No unread TLDR newsletters found."
+            ? incrementalCutoff == null
+              ? "No unread TLDR newsletters found."
+              : "Inbox ready. No new unread TLDR newsletters needed syncing."
             : `Inbox ready. Processed ${refs.length} unread newsletter(s).`,
         discoveredEmails: refs.length,
         processedEmails: refs.length,
         active: false,
         lastFinishedAt: nowTs(),
+        lastSuccessfulSyncStartedAt: syncStartedAt,
       });
     } catch (error) {
       await setSyncState({
