@@ -108,9 +108,13 @@ test("saves an interest prompt and filters flat links by classification", async 
   await expect(page.getByText(/need recheck/i)).toBeVisible();
 
   await page.getByLabel(/Force full resync/i).click();
-  await page.getByRole("button", { name: /Resync all unread mail/i }).click();
+  await page
+    .getByRole("button", { name: /Resync and recheck unresolved links/i })
+    .click();
   await expect(
-    page.getByRole("button", { name: /Resync all unread mail/i }),
+    page.getByRole("button", {
+      name: /Resync and recheck unresolved links/i,
+    }),
   ).toBeVisible({
     timeout: 20_000,
   });
