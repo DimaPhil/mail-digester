@@ -303,22 +303,6 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
   );
 
   useEffect(() => {
-    if (optimisticResolvedIds.current.size === 0) {
-      return;
-    }
-
-    const nextOptimisticResolvedIds = new Set(optimisticResolvedIds.current);
-    for (const email of emails) {
-      for (const item of email.items) {
-        if (item.resolvedAt != null && nextOptimisticResolvedIds.has(item.id)) {
-          nextOptimisticResolvedIds.delete(item.id);
-        }
-      }
-    }
-    optimisticResolvedIds.current = nextOptimisticResolvedIds;
-  }, [emails]);
-
-  useEffect(() => {
     setHydrated(true);
   }, []);
 
