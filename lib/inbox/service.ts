@@ -1,4 +1,8 @@
-import { OPENAI_API_KEY, OPENAI_MODEL } from "@/lib/config";
+import {
+  INTEREST_CLASSIFICATION_CONCURRENCY,
+  OPENAI_API_KEY,
+  OPENAI_MODEL,
+} from "@/lib/config";
 import { fetchReadableSnapshot } from "@/lib/content/readability";
 import { canonicalizeUrl } from "@/lib/content/url";
 import {
@@ -156,6 +160,40 @@ function resolveInboxServices(overrides: Partial<InboxServices> = {}) {
   return createInboxServices(overrides);
 }
 
+async function mapWithConcurrency<T, TResult>(
+  inputs: T[],
+  concurrency: number,
+  mapper: (input: T, index: number) => Promise<TResult>,
+) {
+  if (inputs.length === 0) {
+    return [] satisfies TResult[];
+  }
+
+  const results = new Array<TResult>(inputs.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(concurrency, inputs.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (true) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+
+        if (currentIndex >= inputs.length) {
+          return;
+        }
+
+        results[currentIndex] = await mapper(
+          inputs[currentIndex],
+          currentIndex,
+        );
+      }
+    }),
+  );
+
+  return results;
+}
+
 async function classifyParsedEmail(
   parsed: ParsedDigestEmail,
   appConfig: AppConfigRecord,
@@ -166,39 +204,41 @@ async function classifyParsedEmail(
     return parsed;
   }
 
-  const classifiedItems: ParsedDigestItem[] = [];
+  const classifiedItems = await mapWithConcurrency(
+    parsed.items,
+    INTEREST_CLASSIFICATION_CONCURRENCY,
+    async (item) => {
+      const classification = await services.interestClassifier.classifyLink(
+        {
+          itemId: 0,
+          emailId: 0,
+          emailReceivedAt: parsed.receivedAt,
+          sourceVariant: parsed.sourceVariant,
+          emailSubject: parsed.subject,
+          senderName: parsed.senderName,
+          senderEmail: parsed.senderEmail,
+          section: item.section,
+          position: item.position,
+          title: item.title,
+          summary: item.summary,
+          readTimeText: item.readTimeText,
+          itemKind: item.itemKind,
+          trackedUrl: item.trackedUrl,
+          canonicalUrl: item.canonicalUrl,
+          finalUrl: item.finalUrl,
+        },
+        appConfig,
+        {
+          model: OPENAI_MODEL,
+        },
+      );
 
-  for (const item of parsed.items) {
-    const classification = await services.interestClassifier.classifyLink(
-      {
-        itemId: 0,
-        emailId: 0,
-        emailReceivedAt: parsed.receivedAt,
-        sourceVariant: parsed.sourceVariant,
-        emailSubject: parsed.subject,
-        senderName: parsed.senderName,
-        senderEmail: parsed.senderEmail,
-        section: item.section,
-        position: item.position,
-        title: item.title,
-        summary: item.summary,
-        readTimeText: item.readTimeText,
-        itemKind: item.itemKind,
-        trackedUrl: item.trackedUrl,
-        canonicalUrl: item.canonicalUrl,
-        finalUrl: item.finalUrl,
-      },
-      appConfig,
-      {
-        model: OPENAI_MODEL,
-      },
-    );
-
-    classifiedItems.push({
-      ...item,
-      interest: classification,
-    });
-  }
+      return {
+        ...item,
+        interest: classification,
+      };
+    },
+  );
 
   return {
     ...parsed,
@@ -316,34 +356,47 @@ export async function syncInbox(
             active: true,
           });
 
-          for (const [index, input] of storedInputs.entries()) {
-            const prompt = normalizeInterestPrompt(appConfig.interestPrompt);
-            if (!prompt) {
-              await clearItemInterests();
-              break;
-            }
+          const prompt = normalizeInterestPrompt(appConfig.interestPrompt);
+          if (!prompt) {
+            await clearItemInterests();
+          } else {
+            let processedCount = 0;
+            let progressUpdate = Promise.resolve();
 
-            const classification =
-              await resolvedServices.interestClassifier.classifyLink(
-                input,
-                appConfig,
-                {
-                  model: OPENAI_MODEL,
-                },
-              );
-            await updateItemInterest(input.itemId, classification);
+            await mapWithConcurrency(
+              storedInputs,
+              INTEREST_CLASSIFICATION_CONCURRENCY,
+              async (input) => {
+                const classification =
+                  await resolvedServices.interestClassifier.classifyLink(
+                    input,
+                    appConfig,
+                    {
+                      model: OPENAI_MODEL,
+                    },
+                  );
+                await updateItemInterest(input.itemId, classification);
 
-            await setSyncState({
-              status: "running",
-              phase: "classifying",
-              message: `Reclassified link ${index + 1} of ${storedInputs.length}.`,
-              discoveredEmails: storedInputs.length,
-              processedEmails: index + 1,
-              active: true,
-            });
+                processedCount += 1;
+                const nextProcessedCount = processedCount;
+                progressUpdate = progressUpdate.then(() =>
+                  setSyncState({
+                    status: "running",
+                    phase: "classifying",
+                    message: `Reclassified link ${nextProcessedCount} of ${storedInputs.length}.`,
+                    discoveredEmails: storedInputs.length,
+                    processedEmails: nextProcessedCount,
+                    active: true,
+                  }),
+                );
+                await progressUpdate;
+              },
+            );
+
+            await progressUpdate;
           }
 
-          if (!normalizeInterestPrompt(appConfig.interestPrompt)) {
+          if (!prompt) {
             await setSyncState({
               status: "running",
               phase: "classifying",

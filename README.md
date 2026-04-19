@@ -58,6 +58,7 @@ Optional environment variables:
 - `GMAIL_TLDR_QUERY`: override the Gmail unread query
 - `OPENAI_API_KEY`: required when using the interest-classification prompt
 - `OPENAI_MODEL`: OpenAI model id for link classification, default `gpt-5.4`
+- `MAIL_DIGESTER_INTEREST_CLASSIFICATION_CONCURRENCY`: max number of parallel OpenAI link classifications during sync, default `4`
 - `MAIL_DIGESTER_GWS_CONFIG_DIR`: host path mounted into Docker for `gws` auth data, default `/home/lilfeel/.config/gws`
 - `MAIL_DIGESTER_USE_FIXTURE_DATA=1`: use local fixture mail instead of Gmail
 - `MAIL_DIGESTER_TEST_ARTICLE_BASE_URL`: base URL embedded into fixture newsletter links

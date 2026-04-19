@@ -31,6 +31,7 @@ describe("Inbox service", () => {
     delete process.env.MAIL_DIGESTER_DB_PATH;
     delete process.env.MAIL_DIGESTER_USE_FIXTURE_DATA;
     delete process.env.MAIL_DIGESTER_TEST_ARTICLE_BASE_URL;
+    delete process.env.MAIL_DIGESTER_INTEREST_CLASSIFICATION_CONCURRENCY;
     delete process.env.OPENAI_API_KEY;
     delete process.env.OPENAI_MODEL;
     vi.useRealTimers();
@@ -49,6 +50,35 @@ describe("Inbox service", () => {
     expect(payload.emails).toHaveLength(2);
     expect(payload.emails[0].items.length).toBeGreaterThan(0);
     expect(payload.shouldAutoSync).toBe(false);
+  });
+
+  it("classifies links with bounded concurrency during sync", async () => {
+    process.env.MAIL_DIGESTER_INTEREST_CLASSIFICATION_CONCURRENCY = "2";
+    const { service } = await loadModules();
+    let activeCount = 0;
+    let maxActiveCount = 0;
+
+    await service.updateInterestPrompt("read");
+    await service.syncInbox({
+      interestClassifier: {
+        classifyLink: async (_input, appConfig) => {
+          activeCount += 1;
+          maxActiveCount = Math.max(maxActiveCount, activeCount);
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          activeCount -= 1;
+
+          return {
+            interestStatus: "interesting",
+            interestReason: "Matched test classifier.",
+            interestModel: "test-classifier",
+            interestPromptVersion: appConfig.interestPromptVersion,
+            interestClassifiedAt: Date.now(),
+          } as const;
+        },
+      },
+    });
+
+    expect(maxActiveCount).toBe(2);
   });
 
   it("skips startup auto-sync when there are no unread messages after the last successful sync", async () => {
