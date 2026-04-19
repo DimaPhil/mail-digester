@@ -47,9 +47,11 @@
     "jsdom": "^27.0.1",
     "lucide-react": "^1.8.0",
     "next": "^16.2.3",
+    "openai": "^6.34.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
-    "sanitize-html": "^2.17.2"
+    "sanitize-html": "^2.17.2",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",

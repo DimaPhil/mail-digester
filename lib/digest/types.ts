@@ -1,4 +1,5 @@
 import type { ProviderMessage } from "@/lib/mail/types";
+import type { ItemInterestClassification } from "@/lib/inbox/interest";
 
 export type ParsedDigestItemKind =
   | "editorial"
@@ -17,6 +18,7 @@ export type ParsedDigestItem = {
   trackedUrl: string;
   canonicalUrl: string | null;
   finalUrl: string | null;
+  interest?: ItemInterestClassification;
 };
 
 export type ParsedDigestEmail = {

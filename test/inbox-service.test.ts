@@ -12,6 +12,7 @@ async function loadModules() {
   process.env.MAIL_DIGESTER_DB_PATH = path.join(tmpDir, "test.sqlite");
   process.env.MAIL_DIGESTER_USE_FIXTURE_DATA = "1";
   process.env.MAIL_DIGESTER_TEST_ARTICLE_BASE_URL = "http://fixtures.test";
+  process.env.OPENAI_API_KEY = "test-openai-key";
   delete (globalThis as { __mailDigesterDb?: unknown }).__mailDigesterDb;
   vi.resetModules();
 
@@ -30,6 +31,9 @@ describe("Inbox service", () => {
     delete process.env.MAIL_DIGESTER_DB_PATH;
     delete process.env.MAIL_DIGESTER_USE_FIXTURE_DATA;
     delete process.env.MAIL_DIGESTER_TEST_ARTICLE_BASE_URL;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_MODEL;
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -212,6 +216,106 @@ describe("Inbox service", () => {
     expect(listUnreadCandidates).toHaveBeenNthCalledWith(2, {
       afterTs: null,
     });
+  });
+
+  it("classifies links with the saved interest prompt during sync", async () => {
+    const { service } = await loadModules();
+
+    await service.updateInterestPrompt("openai claude eval");
+    await service.syncInbox();
+
+    const payload = await service.getInboxPayload();
+    const aiEmail = payload.emails.find(
+      (email) => email.providerMessageId === "fixture-ai-001",
+    )!;
+    const mainEmail = payload.emails.find(
+      (email) => email.providerMessageId === "fixture-main-001",
+    )!;
+
+    expect(payload.appConfig.interestPrompt).toBe("openai claude eval");
+    expect(payload.appConfig.openAiModel).toBe("gpt-5.4");
+    expect(
+      aiEmail.items.find((item) => item.title.includes("OpenAI"))
+        ?.interestStatus,
+    ).toBe("interesting");
+    expect(
+      aiEmail.items.find((item) => item.title.includes("Claude"))
+        ?.interestStatus,
+    ).toBe("interesting");
+    expect(
+      mainEmail.items.find((item) => item.title.includes("Amazon"))
+        ?.interestStatus,
+    ).toBe("not_interesting");
+  });
+
+  it("treats stored classifications as stale after prompt changes until full resync", async () => {
+    const { service } = await loadModules();
+
+    await service.updateInterestPrompt("openai");
+    await service.syncInbox();
+
+    await service.updateInterestPrompt("amazon");
+
+    const stalePayload = await service.getInboxPayload();
+    const staleAiEmail = stalePayload.emails.find(
+      (email) => email.providerMessageId === "fixture-ai-001",
+    )!;
+    expect(stalePayload.appConfig.interestRefreshPendingCount).toBeGreaterThan(
+      0,
+    );
+    expect(staleAiEmail.items[0].interestStatus).toBe("unclassified");
+    expect(staleAiEmail.items[0].interestNeedsRefresh).toBe(true);
+
+    await service.syncInbox(undefined, {
+      forceFullResync: true,
+    });
+
+    const refreshedPayload = await service.getInboxPayload();
+    const refreshedAiEmail = refreshedPayload.emails.find(
+      (email) => email.providerMessageId === "fixture-ai-001",
+    )!;
+    const refreshedMainEmail = refreshedPayload.emails.find(
+      (email) => email.providerMessageId === "fixture-main-001",
+    )!;
+    expect(refreshedPayload.appConfig.interestRefreshPendingCount).toBe(0);
+    expect(
+      refreshedAiEmail.items.find((item) => item.title.includes("OpenAI"))
+        ?.interestStatus,
+    ).toBe("not_interesting");
+    expect(
+      refreshedMainEmail.items.find((item) => item.title.includes("Amazon"))
+        ?.interestStatus,
+    ).toBe("interesting");
+  });
+
+  it("bulk resolves older not-interesting links while keeping recent days unresolved", async () => {
+    const { service } = await loadModules();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-11T12:00:00Z"));
+
+    await service.updateInterestPrompt("openai");
+    await service.syncInbox();
+
+    const result = await service.resolveNonInterestingItems(1);
+    expect(result.resolvedCount).toBe(3);
+
+    const payload = await service.getInboxPayload();
+    const olderEmail = payload.emails.find(
+      (email) => email.providerMessageId === "fixture-main-001",
+    )!;
+    const recentEmail = payload.emails.find(
+      (email) => email.providerMessageId === "fixture-ai-001",
+    )!;
+
+    expect(olderEmail.items.every((item) => item.resolvedAt != null)).toBe(
+      true,
+    );
+    expect(
+      recentEmail.items.some(
+        (item) =>
+          item.interestStatus === "not_interesting" && item.resolvedAt == null,
+      ),
+    ).toBe(true);
   });
 
   it("opens an item, extracts article content, and reuses the cached snapshot", async () => {

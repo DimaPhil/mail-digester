@@ -1,6 +1,7 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import {
+  appConfig,
   articleSnapshots,
   emails,
   itemInteractions,
@@ -8,6 +9,12 @@ import {
   syncState,
 } from "@/lib/db/schema";
 import type { ParsedDigestEmail } from "@/lib/digest/types";
+import {
+  normalizeInterestPrompt,
+  type ItemInterestClassification,
+  type ItemInterestStatus,
+  UNCLASSIFIED_ITEM_INTEREST,
+} from "@/lib/inbox/interest";
 import { nowTs } from "@/lib/utils";
 
 export type ItemInteractionAction =
@@ -33,6 +40,12 @@ export type InboxEmailItem = {
   trackedUrl: string;
   canonicalUrl: string | null;
   finalUrl: string | null;
+  interestStatus: ItemInterestStatus;
+  interestReason: string | null;
+  interestModel: string | null;
+  interestPromptVersion: number | null;
+  interestClassifiedAt: number | null;
+  interestNeedsRefresh: boolean;
   resolvedAt: number | null;
 };
 
@@ -71,8 +84,28 @@ export type SyncStateRecord = {
   updatedAt: number;
 };
 
+export type AppConfigRecord = typeof appConfig.$inferSelect;
 export type SnapshotRecord = typeof articleSnapshots.$inferSelect;
 export type ItemInteractionRecord = typeof itemInteractions.$inferSelect;
+
+export type ItemInterestInputRecord = {
+  itemId: number;
+  emailId: number;
+  emailReceivedAt: number;
+  sourceVariant: string;
+  emailSubject: string;
+  senderName: string;
+  senderEmail: string;
+  section: string;
+  position: number;
+  title: string;
+  summary: string;
+  readTimeText: string | null;
+  itemKind: string;
+  trackedUrl: string;
+  canonicalUrl: string | null;
+  finalUrl: string | null;
+};
 
 export async function setSyncState(
   input: Partial<SyncStateRecord> &
@@ -121,6 +154,42 @@ export async function getSyncState(): Promise<SyncStateRecord> {
   }
 
   return state;
+}
+
+export async function getAppConfig(): Promise<AppConfigRecord> {
+  const db = getDb();
+  const config = await db.query.appConfig.findFirst({
+    where: eq(appConfig.id, 1),
+  });
+
+  if (!config) {
+    throw new Error("App config row was not initialized.");
+  }
+
+  return config;
+}
+
+export async function updateAppConfigPrompt(
+  prompt: string | null | undefined,
+): Promise<AppConfigRecord> {
+  const db = getDb();
+  const current = await getAppConfig();
+  const nextPrompt = normalizeInterestPrompt(prompt);
+  const nextVersion =
+    nextPrompt === current.interestPrompt
+      ? current.interestPromptVersion
+      : current.interestPromptVersion + 1;
+
+  await db
+    .update(appConfig)
+    .set({
+      interestPrompt: nextPrompt,
+      interestPromptVersion: nextVersion,
+      updatedAt: nowTs(),
+    })
+    .where(eq(appConfig.id, 1));
+
+  return getAppConfig();
 }
 
 export async function upsertParsedEmail(parsed: ParsedDigestEmail) {
@@ -175,6 +244,7 @@ export async function upsertParsedEmail(parsed: ParsedDigestEmail) {
   }
 
   for (const item of parsed.items) {
+    const interest = item.interest ?? UNCLASSIFIED_ITEM_INTEREST;
     await db
       .insert(items)
       .values({
@@ -189,6 +259,11 @@ export async function upsertParsedEmail(parsed: ParsedDigestEmail) {
         trackedUrl: item.trackedUrl,
         canonicalUrl: item.canonicalUrl,
         finalUrl: item.finalUrl,
+        interestStatus: interest.interestStatus,
+        interestReason: interest.interestReason,
+        interestModel: interest.interestModel,
+        interestPromptVersion: interest.interestPromptVersion,
+        interestClassifiedAt: interest.interestClassifiedAt,
         createdAt: timestamp,
         updatedAt: timestamp,
       })
@@ -204,6 +279,11 @@ export async function upsertParsedEmail(parsed: ParsedDigestEmail) {
           trackedUrl: item.trackedUrl,
           canonicalUrl: item.canonicalUrl,
           finalUrl: item.finalUrl,
+          interestStatus: interest.interestStatus,
+          interestReason: interest.interestReason,
+          interestModel: interest.interestModel,
+          interestPromptVersion: interest.interestPromptVersion,
+          interestClassifiedAt: interest.interestClassifiedAt,
           updatedAt: timestamp,
         },
       });
@@ -263,7 +343,12 @@ export async function listInboxEmails() {
     ...email,
     items: itemRows
       .filter((item) => item.emailId === email.id)
-      .sort((a, b) => a.position - b.position),
+      .sort((a, b) => a.position - b.position)
+      .map((item) => ({
+        ...item,
+        interestStatus: item.interestStatus as ItemInterestStatus,
+        interestNeedsRefresh: false,
+      })),
   }));
 }
 
@@ -278,6 +363,84 @@ export async function getEmailById(emailId: number) {
   const db = getDb();
   return db.query.emails.findFirst({
     where: eq(emails.id, emailId),
+  });
+}
+
+export async function listItemInterestInputs() {
+  const db = getDb();
+  return db
+    .select({
+      itemId: items.id,
+      emailId: items.emailId,
+      emailReceivedAt: emails.receivedAt,
+      sourceVariant: emails.sourceVariant,
+      emailSubject: emails.subject,
+      senderName: emails.senderName,
+      senderEmail: emails.senderEmail,
+      section: items.section,
+      position: items.position,
+      title: items.title,
+      summary: items.summary,
+      readTimeText: items.readTimeText,
+      itemKind: items.itemKind,
+      trackedUrl: items.trackedUrl,
+      canonicalUrl: items.canonicalUrl,
+      finalUrl: items.finalUrl,
+    })
+    .from(items)
+    .innerJoin(emails, eq(items.emailId, emails.id))
+    .orderBy(desc(emails.receivedAt), asc(items.position));
+}
+
+export async function listNonInterestingBulkResolveCandidates(input: {
+  promptVersion: number;
+  receivedBeforeTs: number;
+}) {
+  const db = getDb();
+  return db
+    .select({
+      itemId: items.id,
+      emailId: items.emailId,
+    })
+    .from(items)
+    .innerJoin(emails, eq(items.emailId, emails.id))
+    .where(
+      and(
+        eq(items.interestStatus, "not_interesting"),
+        eq(items.interestPromptVersion, input.promptVersion),
+        isNull(items.resolvedAt),
+        lt(emails.receivedAt, input.receivedBeforeTs),
+      ),
+    );
+}
+
+export async function updateItemInterest(
+  itemId: number,
+  classification: ItemInterestClassification,
+) {
+  const db = getDb();
+  await db
+    .update(items)
+    .set({
+      interestStatus: classification.interestStatus,
+      interestReason: classification.interestReason,
+      interestModel: classification.interestModel,
+      interestPromptVersion: classification.interestPromptVersion,
+      interestClassifiedAt: classification.interestClassifiedAt,
+      updatedAt: nowTs(),
+    })
+    .where(eq(items.id, itemId));
+}
+
+export async function clearItemInterests() {
+  const db = getDb();
+  await db.update(items).set({
+    interestStatus: UNCLASSIFIED_ITEM_INTEREST.interestStatus,
+    interestReason: UNCLASSIFIED_ITEM_INTEREST.interestReason,
+    interestModel: UNCLASSIFIED_ITEM_INTEREST.interestModel,
+    interestPromptVersion: UNCLASSIFIED_ITEM_INTEREST.interestPromptVersion,
+    interestClassifiedAt: UNCLASSIFIED_ITEM_INTEREST.interestClassifiedAt,
+    updatedAt: nowTs(),
   });
 }
 
@@ -356,15 +519,14 @@ export async function listItemInteractions() {
   });
 }
 
-export async function markItemResolved(itemId: number) {
+export async function markItemResolved(itemId: number, resolvedAt = nowTs()) {
   const db = getDb();
-  const timestamp = nowTs();
 
   await db
     .update(items)
     .set({
-      resolvedAt: timestamp,
-      updatedAt: timestamp,
+      resolvedAt,
+      updatedAt: resolvedAt,
     })
     .where(eq(items.id, itemId));
 

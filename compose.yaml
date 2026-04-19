@@ -18,6 +18,8 @@ services:
       GWS_BINARY: gws
       MAIL_DIGESTER_DB_PATH: /app/data/mail-digester.sqlite
       GMAIL_TLDR_QUERY: ${GMAIL_TLDR_QUERY:-is:unread from:tldrnewsletter.com}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.4}
     volumes:
       - ./data:/app/data
       - ${MAIL_DIGESTER_GWS_CONFIG_DIR:-/home/lilfeel/.config/gws}:/home/node/.config/gws

@@ -95,6 +95,54 @@ test("supports a flat link view without requiring email selection", async ({
   ).toBeVisible();
 });
 
+test("saves an interest prompt and filters flat links by classification", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  await page
+    .getByPlaceholder(/Describe what kinds of links are interesting to you/i)
+    .fill("openai");
+  await page.getByRole("button", { name: /Save prompt/i }).click();
+  await expect(page.getByText(/Interest prompt saved/i)).toBeVisible();
+  await expect(page.getByText(/need recheck/i)).toBeVisible();
+
+  await page.getByLabel(/Force full resync/i).click();
+  await page.getByRole("button", { name: /Resync all unread mail/i }).click();
+  await expect(
+    page.getByRole("button", { name: /Resync all unread mail/i }),
+  ).toBeVisible({
+    timeout: 20_000,
+  });
+
+  await page.getByRole("button", { name: /Flat links/i }).click();
+  await page
+    .getByRole("button", { name: /^Interesting$/i })
+    .first()
+    .click();
+
+  await expect(
+    page.getByRole("link", {
+      name: /OpenAI sharpens its enterprise roadmap \(3 minute read\)/i,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", {
+      name: /Amazon escalates the infrastructure race \(5 minute read\)/i,
+    }),
+  ).toHaveCount(0);
+
+  await page
+    .getByRole("button", { name: /^Not interesting$/i })
+    .first()
+    .click();
+  await expect(
+    page.getByRole("link", {
+      name: /Amazon escalates the infrastructure race \(5 minute read\)/i,
+    }),
+  ).toBeVisible();
+});
+
 test("opens email detail as a mobile master-detail view", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");

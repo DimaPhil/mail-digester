@@ -80,6 +80,11 @@ function initializeSchema() {
       tracked_url TEXT NOT NULL,
       canonical_url TEXT,
       final_url TEXT,
+      interest_status TEXT NOT NULL DEFAULT 'unclassified',
+      interest_reason TEXT,
+      interest_model TEXT,
+      interest_prompt_version INTEGER,
+      interest_classified_at INTEGER,
       resolved_at INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
@@ -87,6 +92,9 @@ function initializeSchema() {
 
     CREATE UNIQUE INDEX IF NOT EXISTS items_email_source_item_idx
     ON items(email_id, source_item_id);
+
+    CREATE INDEX IF NOT EXISTS items_interest_status_idx
+    ON items(interest_status, resolved_at, interest_prompt_version);
 
     CREATE TABLE IF NOT EXISTS article_snapshots (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -154,6 +162,40 @@ function initializeSchema() {
       last_error TEXT,
       updated_at INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS app_config (
+      id INTEGER PRIMARY KEY,
+      interest_prompt TEXT,
+      interest_prompt_version INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  `);
+
+  const itemColumns = instance.sqlite
+    .prepare("PRAGMA table_info(items)")
+    .all() as Array<{ name: string }>;
+  const itemColumnDefinitions = [
+    ["interest_status", "TEXT NOT NULL DEFAULT 'unclassified'"],
+    ["interest_reason", "TEXT"],
+    ["interest_model", "TEXT"],
+    ["interest_prompt_version", "INTEGER"],
+    ["interest_classified_at", "INTEGER"],
+  ] as const;
+
+  for (const [name, definition] of itemColumnDefinitions) {
+    const hasColumn = itemColumns.some((column) => column.name === name);
+    if (!hasColumn) {
+      instance.sqlite.exec(`
+        ALTER TABLE items
+        ADD COLUMN ${name} ${definition}
+      `);
+    }
+  }
+
+  instance.sqlite.exec(`
+    CREATE INDEX IF NOT EXISTS items_interest_status_idx
+    ON items(interest_status, resolved_at, interest_prompt_version)
   `);
 
   const syncStateColumns = instance.sqlite
@@ -181,6 +223,18 @@ function initializeSchema() {
     `,
     )
     .run(nowTs());
+
+  instance.sqlite
+    .prepare(
+      `
+      INSERT OR IGNORE INTO app_config (
+        id, interest_prompt, interest_prompt_version, created_at, updated_at
+      ) VALUES (
+        1, NULL, 0, ?, ?
+      )
+    `,
+    )
+    .run(nowTs(), nowTs());
 
   instance.initialized = true;
 }

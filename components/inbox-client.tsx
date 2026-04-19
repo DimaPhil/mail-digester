@@ -31,6 +31,11 @@ type UndoState = {
 type EmailItem = InboxPayload["emails"][number]["items"][number];
 type EmailRecord = InboxPayload["emails"][number];
 type GroupedSections = Array<[string, EmailItem[]]>;
+type InterestFilter =
+  | "all"
+  | "interesting"
+  | "not_interesting"
+  | "unclassified";
 type SortDirection = "asc" | "desc";
 type ViewMode = "emails" | "flat";
 
@@ -63,6 +68,37 @@ function progressPercent(processed: number, total: number) {
   return Math.max(0, Math.min(100, Math.round((processed / total) * 100)));
 }
 
+function matchesInterestFilter(item: EmailItem, filter: InterestFilter) {
+  return filter === "all" || item.interestStatus === filter;
+}
+
+function interestLabel(item: EmailItem) {
+  if (item.interestNeedsRefresh) {
+    return "Needs recheck";
+  }
+
+  switch (item.interestStatus) {
+    case "interesting":
+      return "Interesting";
+    case "not_interesting":
+      return "Not interesting";
+    default:
+      return "Unclassified";
+  }
+}
+
+function interestTone(item: EmailItem): "accent" | "neutral" | "warning" {
+  if (item.interestStatus === "interesting") {
+    return "accent";
+  }
+
+  if (item.interestStatus === "not_interesting") {
+    return "warning";
+  }
+
+  return "neutral";
+}
+
 async function readJson<T>(input: RequestInfo, init?: RequestInit) {
   const response = await fetch(input, init);
   const payload = (await response.json()) as T;
@@ -81,6 +117,7 @@ async function readJson<T>(input: RequestInfo, init?: RequestInit) {
 export function InboxClient({ initialData }: { initialData: InboxPayload }) {
   const [emails, setEmails] = useState(initialData.emails);
   const [sync, setSync] = useState(initialData.sync);
+  const [appConfig, setAppConfig] = useState(initialData.appConfig);
   const [undoState, setUndoState] = useState<UndoState>(null);
   const [resolvingIds, setResolvingIds] = useState<number[]>([]);
   const optimisticResolvedIds = useRef<Set<number>>(new Set());
@@ -93,6 +130,14 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
   );
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [viewMode, setViewMode] = useState<ViewMode>("emails");
+  const [interestFilter, setInterestFilter] = useState<InterestFilter>("all");
+  const [interestPromptDraft, setInterestPromptDraft] = useState(
+    initialData.appConfig.interestPrompt,
+  );
+  const [keepRecentDays, setKeepRecentDays] = useState("7");
+  const [configPending, setConfigPending] = useState(false);
+  const [bulkResolvePending, setBulkResolvePending] = useState(false);
+  const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [forceFullResync, setForceFullResync] = useState(false);
   const [refreshPending, startRefreshTransition] = useTransition();
@@ -139,12 +184,31 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     [visibleEmails],
   );
 
+  const filteredUnresolvedCount = useMemo(
+    () =>
+      activeEmails.reduce(
+        (sum, email) =>
+          sum +
+          email.items.filter(
+            (item) =>
+              item.resolvedAt == null &&
+              matchesInterestFilter(item, interestFilter),
+          ).length,
+        0,
+      ),
+    [activeEmails, interestFilter],
+  );
+
   const flatItems = useMemo(
     () =>
       activeEmails
         .flatMap((email) =>
           email.items
-            .filter((item) => item.resolvedAt == null)
+            .filter(
+              (item) =>
+                item.resolvedAt == null &&
+                matchesInterestFilter(item, interestFilter),
+            )
             .map((item) => ({
               email,
               item,
@@ -157,7 +221,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
               : b.email.receivedAt - a.email.receivedAt;
           return dateDelta || a.item.position - b.item.position;
         }),
-    [activeEmails, sortDirection],
+    [activeEmails, interestFilter, sortDirection],
   );
 
   const selectedEmail =
@@ -177,17 +241,19 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     }
 
     const unresolved = selectedEmail.items.filter(
-      (item) => item.resolvedAt == null,
+      (item) =>
+        item.resolvedAt == null && matchesInterestFilter(item, interestFilter),
     );
     const resolved = selectedEmail.items.filter(
-      (item) => item.resolvedAt != null,
+      (item) =>
+        item.resolvedAt != null && matchesInterestFilter(item, interestFilter),
     );
 
     return {
       unresolved: groupSections(unresolved) as GroupedSections,
       resolved: groupSections(resolved) as GroupedSections,
     };
-  }, [selectedEmail]);
+  }, [interestFilter, selectedEmail]);
 
   const applyOptimisticResolutions = useCallback(
     (nextEmails: InboxPayload["emails"]) => {
@@ -294,8 +360,13 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     const payload = await readJson<InboxPayload>("/api/inbox");
     setEmails(applyOptimisticResolutions(payload.emails));
     setSync(payload.sync);
+    setAppConfig(payload.appConfig);
     return payload;
   }, [applyOptimisticResolutions]);
+
+  useEffect(() => {
+    setInterestPromptDraft(appConfig.interestPrompt);
+  }, [appConfig.interestPrompt]);
 
   function stopPolling() {
     if (pollTimer.current != null) {
@@ -361,6 +432,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
       startTransition(() => {
         setEmails(applyOptimisticResolutions(payload.emails));
         setSync(payload.sync);
+        setAppConfig(payload.appConfig);
       });
     } finally {
       stopPolling();
@@ -402,6 +474,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
           startTransition(() => {
             setEmails(applyOptimisticResolutions(payload.emails));
             setSync(payload.sync);
+            setAppConfig(payload.appConfig);
           });
         } finally {
           stopPolling();
@@ -602,6 +675,75 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     await syncInboxData();
   }
 
+  async function saveInterestPrompt() {
+    setConfigPending(true);
+    setFeedbackMessage(null);
+
+    try {
+      const payload = await readJson<InboxPayload>("/api/config", {
+        body: JSON.stringify({
+          interestPrompt: interestPromptDraft,
+        }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      setEmails(applyOptimisticResolutions(payload.emails));
+      setSync(payload.sync);
+      setAppConfig(payload.appConfig);
+      setFeedbackMessage("Interest prompt saved.");
+    } catch (error) {
+      setFeedbackMessage(
+        error instanceof Error ? error.message : "Failed to save prompt.",
+      );
+    } finally {
+      setConfigPending(false);
+    }
+  }
+
+  async function bulkResolveNotInteresting() {
+    const parsedDays = Number(keepRecentDays);
+    if (!Number.isFinite(parsedDays) || parsedDays < 0) {
+      setFeedbackMessage("Keep recent days must be a non-negative number.");
+      return;
+    }
+
+    setBulkResolvePending(true);
+    setFeedbackMessage(null);
+
+    try {
+      const payload = await readJson<{
+        emails: InboxPayload["emails"];
+        resolvedCount: number;
+      }>("/api/items/resolve-not-interesting", {
+        body: JSON.stringify({
+          keepRecentDays: Math.floor(parsedDays),
+          metadata: getInteractionMetadata(),
+        }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      setEmails(applyOptimisticResolutions(payload.emails));
+      setFeedbackMessage(
+        payload.resolvedCount === 0
+          ? "No not-interesting links matched the selected age cutoff."
+          : `Resolved ${payload.resolvedCount} not-interesting link${payload.resolvedCount === 1 ? "" : "s"}.`,
+      );
+      await syncInboxData();
+    } catch (error) {
+      setFeedbackMessage(
+        error instanceof Error
+          ? error.message
+          : "Failed to resolve not-interesting links.",
+      );
+    } finally {
+      setBulkResolvePending(false);
+    }
+  }
+
   function selectEmail(emailId: number) {
     setSelectedEmailId(emailId);
 
@@ -707,6 +849,41 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     );
   }
 
+  function renderInterestControls() {
+    const options: Array<{
+      label: string;
+      value: InterestFilter;
+    }> = [
+      { label: "All links", value: "all" },
+      { label: "Interesting", value: "interesting" },
+      { label: "Not interesting", value: "not_interesting" },
+      { label: "Unclassified", value: "unclassified" },
+    ];
+
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--muted)]">
+          Interest
+        </span>
+        {options.map((option) => (
+          <button
+            key={option.value}
+            className={cn(
+              "rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] transition",
+              interestFilter === option.value
+                ? "border-[var(--accent)] bg-white text-[var(--accent-strong)]"
+                : "border-[var(--border)] bg-[var(--panel-strong)] text-[var(--muted)] hover:border-[var(--accent)]",
+            )}
+            onClick={() => setInterestFilter(option.value)}
+            type="button"
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    );
+  }
+
   function renderFlatItemCard(email: EmailRecord, item: EmailItem) {
     const isResolving = resolvingIds.includes(item.id);
     const href = item.finalUrl ?? item.canonicalUrl ?? item.trackedUrl;
@@ -763,6 +940,10 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                 label={item.itemKind}
                 tone={item.itemKind === "sponsor" ? "warning" : "neutral"}
               />
+              <StatusChip
+                label={interestLabel(item)}
+                tone={interestTone(item)}
+              />
               {item.readTimeText ? (
                 <StatusChip label={item.readTimeText} tone="neutral" />
               ) : null}
@@ -775,6 +956,11 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
               <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--muted)]">
                 {visibleSummary}
               </p>
+              {item.interestReason ? (
+                <p className="mt-3 text-sm leading-6 text-[var(--text)]">
+                  Why: {item.interestReason}
+                </p>
+              ) : null}
               {hasLongSummary ? (
                 <button
                   className="mt-3 inline-flex rounded-full border border-[var(--border)] bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--accent-strong)] transition hover:border-[var(--accent)]"
@@ -829,7 +1015,10 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
             </div>
           </div>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            {renderSortControls()}
+            <div className="flex flex-col gap-3">
+              {renderSortControls()}
+              {renderInterestControls()}
+            </div>
             {renderViewControls()}
           </div>
         </div>
@@ -858,6 +1047,13 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
   }
 
   function renderEmailDetail() {
+    const selectedEmailTotalUnresolved =
+      selectedEmail?.items.filter((item) => item.resolvedAt == null).length ??
+      0;
+    const filteredSelectedItemCount =
+      selectedEmailSections.unresolved.length +
+      selectedEmailSections.resolved.length;
+
     return (
       <>
         <div className="border-b border-[var(--border)] px-4 py-4 sm:px-5 md:px-6">
@@ -945,14 +1141,20 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                 <div className="rounded-[24px] border border-dashed border-[var(--border)] bg-white/65 p-6 text-center sm:p-8">
                   <MailCheck className="mx-auto h-10 w-10 text-[var(--accent)]" />
                   <h3 className="mt-4 font-[var(--font-source-serif)] text-2xl">
-                    This email is fully resolved
+                    {selectedEmailTotalUnresolved === 0
+                      ? "This email is fully resolved"
+                      : filteredSelectedItemCount === 0
+                        ? "No links match the current interest filter"
+                        : "This filter has no unresolved links"}
                   </h3>
                   <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--muted)]">
-                    Gmail read-state sync{" "}
-                    {selectedEmail.gmailSyncPending
-                      ? "is pending retry"
-                      : "has been handled"}
-                    .
+                    {selectedEmailTotalUnresolved === 0
+                      ? `Gmail read-state sync ${
+                          selectedEmail.gmailSyncPending
+                            ? "is pending retry"
+                            : "has been handled"
+                        }.`
+                      : "Adjust the interest filter or switch to the flat link view to inspect a broader queue."}
                   </p>
                 </div>
               ) : null}
@@ -1015,6 +1217,10 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                                         : "neutral"
                                     }
                                   />
+                                  <StatusChip
+                                    label={interestLabel(item)}
+                                    tone={interestTone(item)}
+                                  />
                                   {item.readTimeText ? (
                                     <StatusChip
                                       label={item.readTimeText}
@@ -1030,6 +1236,11 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                                   <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--muted)]">
                                     {visibleSummary}
                                   </p>
+                                  {item.interestReason ? (
+                                    <p className="mt-3 text-sm leading-6 text-[var(--text)]">
+                                      Why: {item.interestReason}
+                                    </p>
+                                  ) : null}
                                   {hasLongSummary ? (
                                     <button
                                       className="mt-3 inline-flex rounded-full border border-[var(--border)] bg-white px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--accent-strong)] transition hover:border-[var(--accent)]"
@@ -1216,6 +1427,10 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                   tone="accent"
                 />
                 <StatusChip
+                  label={`${filteredUnresolvedCount} visible under filter`}
+                  tone="neutral"
+                />
+                <StatusChip
                   label={
                     sync.lastFinishedAt
                       ? formatLastSync(sync.lastFinishedAt)
@@ -1225,12 +1440,15 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                 />
               </div>
               <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-                {renderSortControls()}
+                <div className="flex flex-col gap-3">
+                  {renderSortControls()}
+                  {renderInterestControls()}
+                </div>
                 {renderViewControls()}
               </div>
             </div>
             <div className="flex items-start justify-start md:justify-end">
-              <div className="flex flex-col items-start gap-3">
+              <div className="flex w-full max-w-md flex-col items-start gap-3">
                 <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-[var(--muted)]">
                   <Checkbox.Root
                     checked={forceFullResync}
@@ -1269,6 +1487,104 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                       ? "Resync all unread mail"
                       : "Sync new unread mail"}
                 </button>
+                <div className="w-full rounded-[24px] border border-[var(--border)] bg-white/80 p-4 shadow-[0_12px_30px_rgba(32,23,13,0.08)]">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusChip label={appConfig.openAiModel} tone="accent" />
+                    <StatusChip
+                      label={
+                        appConfig.openAiApiKeyConfigured
+                          ? "OpenAI key ready"
+                          : "OpenAI key missing"
+                      }
+                      tone={
+                        appConfig.openAiApiKeyConfigured ? "neutral" : "warning"
+                      }
+                    />
+                    {appConfig.interestRefreshPendingCount > 0 ? (
+                      <StatusChip
+                        label={`${appConfig.interestRefreshPendingCount} link${appConfig.interestRefreshPendingCount === 1 ? "" : "s"} need recheck`}
+                        tone="warning"
+                      />
+                    ) : null}
+                  </div>
+                  <div className="mt-3 text-sm font-semibold text-[var(--text)]">
+                    Interest prompt
+                  </div>
+                  <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
+                    The prompt is applied to each individual link during sync
+                    and decides whether it is interesting or not.
+                  </p>
+                  <textarea
+                    className="mt-3 min-h-32 w-full rounded-[18px] border border-[var(--border)] bg-[var(--panel-strong)] px-4 py-3 text-sm leading-6 text-[var(--text)] outline-none transition focus:border-[var(--accent)]"
+                    disabled={configPending}
+                    onChange={(event) =>
+                      setInterestPromptDraft(event.target.value)
+                    }
+                    placeholder="Describe what kinds of links are interesting to you."
+                    value={interestPromptDraft}
+                  />
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <button
+                      className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-white px-4 py-2 text-sm font-medium shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={configPending}
+                      onClick={() => void saveInterestPrompt()}
+                      type="button"
+                    >
+                      {configPending ? (
+                        <LoaderCircle className="h-4 w-4 animate-spin" />
+                      ) : null}
+                      Save prompt
+                    </button>
+                    {appConfig.interestRefreshPendingCount > 0 ? (
+                      <span className="text-xs text-[var(--muted)]">
+                        Run a full resync to reclassify stored links with the
+                        latest prompt.
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="mt-4 border-t border-[var(--border)] pt-4">
+                    <div className="text-sm font-semibold text-[var(--text)]">
+                      Bulk resolve not-interesting links
+                    </div>
+                    <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
+                      Leave the most recent N days unresolved, and resolve older
+                      links classified as not interesting.
+                    </p>
+                    <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center">
+                      <input
+                        className="w-full rounded-full border border-[var(--border)] bg-[var(--panel-strong)] px-4 py-2 text-sm outline-none transition focus:border-[var(--accent)] sm:max-w-32"
+                        disabled={bulkResolvePending}
+                        inputMode="numeric"
+                        min="0"
+                        onChange={(event) =>
+                          setKeepRecentDays(event.target.value)
+                        }
+                        type="number"
+                        value={keepRecentDays}
+                      />
+                      <button
+                        className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-white px-4 py-2 text-sm font-medium shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={
+                          bulkResolvePending ||
+                          !appConfig.interestPrompt.trim() ||
+                          !appConfig.openAiApiKeyConfigured
+                        }
+                        onClick={() => void bulkResolveNotInteresting()}
+                        type="button"
+                      >
+                        {bulkResolvePending ? (
+                          <LoaderCircle className="h-4 w-4 animate-spin" />
+                        ) : null}
+                        Resolve older not-interesting links
+                      </button>
+                    </div>
+                  </div>
+                  {feedbackMessage ? (
+                    <div className="mt-3 text-sm text-[var(--muted)]">
+                      {feedbackMessage}
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </div>
           </div>
@@ -1306,8 +1622,10 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
               </div>
               <div className="flex flex-wrap gap-4 text-xs text-[var(--muted)]">
                 <span>
-                  Emails processed: {sync.processedEmails}/
-                  {sync.discoveredEmails || "?"}
+                  {sync.phase === "classifying"
+                    ? "Links classified"
+                    : "Emails processed"}
+                  : {sync.processedEmails}/{sync.discoveredEmails || "?"}
                 </span>
                 {sync.lastError ? <span>Error: {sync.lastError}</span> : null}
               </div>

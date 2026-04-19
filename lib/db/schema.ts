@@ -1,4 +1,5 @@
 import {
+  index,
   integer,
   sqliteTable,
   text,
@@ -53,6 +54,13 @@ export const items = sqliteTable(
     trackedUrl: text("tracked_url").notNull(),
     canonicalUrl: text("canonical_url"),
     finalUrl: text("final_url"),
+    interestStatus: text("interest_status").notNull().default("unclassified"),
+    interestReason: text("interest_reason"),
+    interestModel: text("interest_model"),
+    interestPromptVersion: integer("interest_prompt_version"),
+    interestClassifiedAt: integer("interest_classified_at", {
+      mode: "number",
+    }),
     resolvedAt: integer("resolved_at", { mode: "number" }),
     createdAt: integer("created_at", { mode: "number" }).notNull(),
     updatedAt: integer("updated_at", { mode: "number" }).notNull(),
@@ -62,8 +70,23 @@ export const items = sqliteTable(
       table.emailId,
       table.sourceItemId,
     ),
+    interestStatusIdx: index("items_interest_status_idx").on(
+      table.interestStatus,
+      table.resolvedAt,
+      table.interestPromptVersion,
+    ),
   }),
 );
+
+export const appConfig = sqliteTable("app_config", {
+  id: integer("id").primaryKey(),
+  interestPrompt: text("interest_prompt"),
+  interestPromptVersion: integer("interest_prompt_version")
+    .notNull()
+    .default(0),
+  createdAt: integer("created_at", { mode: "number" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "number" }).notNull(),
+});
 
 export const articleSnapshots = sqliteTable("article_snapshots", {
   id: integer("id").primaryKey({ autoIncrement: true }),
