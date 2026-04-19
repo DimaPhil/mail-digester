@@ -48,6 +48,7 @@ export type InboxServices = {
 
 export type SyncInboxOptions = {
   forceFullResync?: boolean;
+  includeResolvedItemsInRecheck?: boolean;
 };
 
 export type InboxAppConfig = {
@@ -278,6 +279,8 @@ export async function syncInbox(
       getAppConfig(),
     ]);
     const forceFullResync = options.forceFullResync === true;
+    const includeResolvedItemsInRecheck =
+      forceFullResync && options.includeResolvedItemsInRecheck === true;
     const incrementalCutoff = forceFullResync
       ? null
       : currentSyncState.lastSuccessfulSyncStartedAt;
@@ -300,12 +303,14 @@ export async function syncInbox(
 
     try {
       if (forceFullResync) {
-        const storedInputs = await listItemInterestInputs();
+        const storedInputs = await listItemInterestInputs({
+          includeResolved: includeResolvedItemsInRecheck,
+        });
         if (storedInputs.length > 0) {
           await setSyncState({
             status: "running",
             phase: "classifying",
-            message: `Reclassifying ${storedInputs.length} stored link${storedInputs.length === 1 ? "" : "s"} with the current prompt…`,
+            message: `Reclassifying ${storedInputs.length} ${includeResolvedItemsInRecheck ? "stored" : "unresolved"} link${storedInputs.length === 1 ? "" : "s"} with the current prompt…`,
             discoveredEmails: storedInputs.length,
             processedEmails: 0,
             active: true,
@@ -393,7 +398,9 @@ export async function syncInbox(
           appConfig,
           resolvedServices,
         );
-        await upsertParsedEmail(parsed);
+        await upsertParsedEmail(parsed, {
+          preserveResolvedItemInterests: !includeResolvedItemsInRecheck,
+        });
 
         await setSyncState({
           status: "running",

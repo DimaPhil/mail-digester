@@ -7,9 +7,12 @@ export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => null)) as {
       forceFullResync?: boolean;
+      includeResolvedItemsInRecheck?: boolean;
     } | null;
     await syncInbox(undefined, {
       forceFullResync: body?.forceFullResync === true,
+      includeResolvedItemsInRecheck:
+        body?.includeResolvedItemsInRecheck === true,
     });
     return NextResponse.json(await getInboxPayload());
   } catch (error) {

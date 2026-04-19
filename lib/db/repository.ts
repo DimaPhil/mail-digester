@@ -192,7 +192,10 @@ export async function updateAppConfigPrompt(
   return getAppConfig();
 }
 
-export async function upsertParsedEmail(parsed: ParsedDigestEmail) {
+export async function upsertParsedEmail(
+  parsed: ParsedDigestEmail,
+  options?: { preserveResolvedItemInterests?: boolean },
+) {
   const db = getDb();
   const timestamp = nowTs();
 
@@ -243,8 +246,25 @@ export async function upsertParsedEmail(parsed: ParsedDigestEmail) {
     throw new Error("Email upsert failed.");
   }
 
+  const existingItems = await db.query.items.findMany({
+    where: eq(items.emailId, email.id),
+  });
+  const existingItemsBySourceItemId = new Map(
+    existingItems.map((item) => [item.sourceItemId, item]),
+  );
+
   for (const item of parsed.items) {
-    const interest = item.interest ?? UNCLASSIFIED_ITEM_INTEREST;
+    const existingItem = existingItemsBySourceItemId.get(item.sourceItemId);
+    const interest =
+      options?.preserveResolvedItemInterests && existingItem?.resolvedAt != null
+        ? {
+            interestStatus: existingItem.interestStatus as ItemInterestStatus,
+            interestReason: existingItem.interestReason,
+            interestModel: existingItem.interestModel,
+            interestPromptVersion: existingItem.interestPromptVersion,
+            interestClassifiedAt: existingItem.interestClassifiedAt,
+          }
+        : (item.interest ?? UNCLASSIFIED_ITEM_INTEREST);
     await db
       .insert(items)
       .values({
@@ -366,7 +386,9 @@ export async function getEmailById(emailId: number) {
   });
 }
 
-export async function listItemInterestInputs() {
+export async function listItemInterestInputs(options?: {
+  includeResolved?: boolean;
+}) {
   const db = getDb();
   return db
     .select({
@@ -389,6 +411,7 @@ export async function listItemInterestInputs() {
     })
     .from(items)
     .innerJoin(emails, eq(items.emailId, emails.id))
+    .where(options?.includeResolved ? undefined : isNull(items.resolvedAt))
     .orderBy(desc(emails.receivedAt), asc(items.position));
 }
 

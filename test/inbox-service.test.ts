@@ -288,6 +288,64 @@ describe("Inbox service", () => {
     ).toBe("interesting");
   });
 
+  it("rechecks only unresolved links by default during a forced resync", async () => {
+    const { service } = await loadModules();
+
+    await service.updateInterestPrompt("openai");
+    await service.syncInbox();
+
+    const initialPayload = await service.getInboxPayload();
+    const aiEmail = initialPayload.emails.find(
+      (email) => email.providerMessageId === "fixture-ai-001",
+    )!;
+    const resolvedItem = aiEmail.items.find((item) =>
+      item.title.includes("OpenAI"),
+    )!;
+
+    await service.resolveItem(resolvedItem.id);
+    await service.updateInterestPrompt("amazon");
+
+    await service.syncInbox(undefined, {
+      forceFullResync: true,
+    });
+
+    const unresolvedOnlyPayload = await service.getInboxPayload();
+    const unresolvedOnlyAiEmail = unresolvedOnlyPayload.emails.find(
+      (email) => email.providerMessageId === "fixture-ai-001",
+    )!;
+    const unresolvedOnlyMainEmail = unresolvedOnlyPayload.emails.find(
+      (email) => email.providerMessageId === "fixture-main-001",
+    )!;
+    const staleResolvedItem = unresolvedOnlyAiEmail.items.find(
+      (item) => item.id === resolvedItem.id,
+    )!;
+
+    expect(staleResolvedItem.resolvedAt).not.toBeNull();
+    expect(staleResolvedItem.interestStatus).toBe("unclassified");
+    expect(staleResolvedItem.interestNeedsRefresh).toBe(true);
+    expect(
+      unresolvedOnlyMainEmail.items.find((item) =>
+        item.title.includes("Amazon"),
+      )?.interestStatus,
+    ).toBe("interesting");
+
+    await service.syncInbox(undefined, {
+      forceFullResync: true,
+      includeResolvedItemsInRecheck: true,
+    });
+
+    const includeResolvedPayload = await service.getInboxPayload();
+    const includeResolvedAiEmail = includeResolvedPayload.emails.find(
+      (email) => email.providerMessageId === "fixture-ai-001",
+    )!;
+    const refreshedResolvedItem = includeResolvedAiEmail.items.find(
+      (item) => item.id === resolvedItem.id,
+    )!;
+
+    expect(refreshedResolvedItem.interestStatus).toBe("not_interesting");
+    expect(refreshedResolvedItem.interestNeedsRefresh).toBe(false);
+  });
+
   it("bulk resolves older not-interesting links while keeping recent days unresolved", async () => {
     const { service } = await loadModules();
     vi.useFakeTimers();

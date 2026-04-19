@@ -140,6 +140,8 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [forceFullResync, setForceFullResync] = useState(false);
+  const [includeResolvedItemsInRecheck, setIncludeResolvedItemsInRecheck] =
+    useState(false);
   const [refreshPending, startRefreshTransition] = useTransition();
   const autoSyncTriggered = useRef(false);
   const pollTimer = useRef<number | null>(null);
@@ -396,7 +398,10 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
 
   async function triggerSync(
     reason: "startup" | "manual",
-    options: { forceFullResync?: boolean } = {},
+    options: {
+      forceFullResync?: boolean;
+      includeResolvedItemsInRecheck?: boolean;
+    } = {},
   ) {
     if (reason === "startup" && autoSyncTriggered.current) {
       return;
@@ -404,6 +409,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
 
     autoSyncTriggered.current = true;
     const forceResync = options.forceFullResync === true;
+    const includeResolved = options.includeResolvedItemsInRecheck === true;
     setSync((current) => ({
       ...current,
       active: true,
@@ -413,7 +419,9 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
         reason === "startup"
           ? "Starting inbox sync for unread TLDR newsletters…"
           : forceResync
-            ? "Refreshing all unread TLDR newsletters from scratch…"
+            ? includeResolved
+              ? "Refreshing unread TLDR newsletters and rechecking all stored links…"
+              : "Refreshing unread TLDR newsletters and rechecking unresolved links…"
             : "Refreshing unread TLDR newsletters since the last sync…",
     }));
 
@@ -423,6 +431,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
       const payload = await readJson<InboxPayload>("/api/sync", {
         body: JSON.stringify({
           forceFullResync: forceResync,
+          includeResolvedItemsInRecheck: includeResolved,
         }),
         headers: {
           "Content-Type": "application/json",
@@ -1454,15 +1463,34 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                     checked={forceFullResync}
                     className="inline-flex h-5 w-5 items-center justify-center rounded border border-[var(--border)] bg-white transition hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-60"
                     disabled={refreshPending || sync.active}
-                    onCheckedChange={(checked) =>
-                      setForceFullResync(checked === true)
-                    }
+                    onCheckedChange={(checked) => {
+                      const nextChecked = checked === true;
+                      setForceFullResync(nextChecked);
+                      if (!nextChecked) {
+                        setIncludeResolvedItemsInRecheck(false);
+                      }
+                    }}
                   >
                     <Checkbox.Indicator>
                       <Check className="h-3.5 w-3.5 text-[var(--accent)]" />
                     </Checkbox.Indicator>
                   </Checkbox.Root>
                   Force full resync
+                </label>
+                <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-[var(--muted)]">
+                  <Checkbox.Root
+                    checked={includeResolvedItemsInRecheck}
+                    className="inline-flex h-5 w-5 items-center justify-center rounded border border-[var(--border)] bg-white transition hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={refreshPending || sync.active || !forceFullResync}
+                    onCheckedChange={(checked) =>
+                      setIncludeResolvedItemsInRecheck(checked === true)
+                    }
+                  >
+                    <Checkbox.Indicator>
+                      <Check className="h-3.5 w-3.5 text-[var(--accent)]" />
+                    </Checkbox.Indicator>
+                  </Checkbox.Root>
+                  Include resolved links in recheck
                 </label>
                 <button
                   className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-white px-4 py-3 text-sm font-medium shadow-[0_12px_30px_rgba(32,23,13,0.08)] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
@@ -1471,6 +1499,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                     startRefreshTransition(() => {
                       void triggerSync("manual", {
                         forceFullResync,
+                        includeResolvedItemsInRecheck,
                       });
                     });
                   }}
@@ -1484,7 +1513,9 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                   {sync.active
                     ? "Syncing inbox…"
                     : forceFullResync
-                      ? "Resync all unread mail"
+                      ? includeResolvedItemsInRecheck
+                        ? "Resync and recheck all links"
+                        : "Resync and recheck unresolved links"
                       : "Sync new unread mail"}
                 </button>
                 <div className="w-full rounded-[24px] border border-[var(--border)] bg-white/80 p-4 shadow-[0_12px_30px_rgba(32,23,13,0.08)]">
