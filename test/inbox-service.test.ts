@@ -376,6 +376,86 @@ describe("Inbox service", () => {
     expect(refreshedResolvedItem.interestNeedsRefresh).toBe(false);
   });
 
+  it("builds a separate AI feature list from stored links", async () => {
+    const { service } = await loadModules();
+
+    await service.syncInbox();
+    await service.updateAiFeaturePrompt(
+      "openai claude anthropic roadmap panels",
+    );
+
+    const stalePayload = await service.getInboxPayload();
+    expect(stalePayload.appConfig.aiFeatureRefreshPendingCount).toBeGreaterThan(
+      0,
+    );
+
+    await service.buildAiFeatureList();
+
+    const payload = await service.getInboxPayload();
+    const aiEmail = payload.emails.find(
+      (email) => email.providerMessageId === "fixture-ai-001",
+    )!;
+    const mainEmail = payload.emails.find(
+      (email) => email.providerMessageId === "fixture-main-001",
+    )!;
+
+    expect(payload.appConfig.aiFeaturePrompt).toBe(
+      "openai claude anthropic roadmap panels",
+    );
+    expect(payload.appConfig.aiFeatureRefreshPendingCount).toBe(0);
+    expect(
+      aiEmail.items.find((item) => item.title.includes("OpenAI"))
+        ?.aiFeatureStatus,
+    ).toBe("included");
+    expect(
+      aiEmail.items.find((item) => item.title.includes("Claude"))
+        ?.aiFeatureStatus,
+    ).toBe("included");
+    expect(
+      mainEmail.items.find((item) => item.title.includes("Amazon"))
+        ?.aiFeatureStatus,
+    ).toBe("excluded");
+  });
+
+  it("can include resolved links when building the separate AI feature list", async () => {
+    const { service } = await loadModules();
+
+    await service.syncInbox();
+    await service.updateAiFeaturePrompt("openai roadmap");
+
+    const initialPayload = await service.getInboxPayload();
+    const aiEmail = initialPayload.emails.find(
+      (email) => email.providerMessageId === "fixture-ai-001",
+    )!;
+    const resolvedItem = aiEmail.items.find((item) =>
+      item.title.includes("OpenAI"),
+    )!;
+
+    await service.resolveItem(resolvedItem.id);
+    await service.buildAiFeatureList();
+
+    const unresolvedOnlyPayload = await service.getInboxPayload();
+    const unresolvedOnlyItem = unresolvedOnlyPayload.emails
+      .find((email) => email.providerMessageId === "fixture-ai-001")!
+      .items.find((item) => item.id === resolvedItem.id)!;
+
+    expect(unresolvedOnlyItem.resolvedAt).not.toBeNull();
+    expect(unresolvedOnlyItem.aiFeatureStatus).toBe("unclassified");
+    expect(unresolvedOnlyItem.aiFeatureNeedsRefresh).toBe(true);
+
+    await service.buildAiFeatureList(undefined, {
+      includeResolvedItems: true,
+    });
+
+    const includeResolvedPayload = await service.getInboxPayload();
+    const includeResolvedItem = includeResolvedPayload.emails
+      .find((email) => email.providerMessageId === "fixture-ai-001")!
+      .items.find((item) => item.id === resolvedItem.id)!;
+
+    expect(includeResolvedItem.aiFeatureStatus).toBe("included");
+    expect(includeResolvedItem.aiFeatureNeedsRefresh).toBe(false);
+  });
+
   it("bulk resolves older not-interesting links while keeping recent days unresolved", async () => {
     const { service } = await loadModules();
     vi.useFakeTimers();

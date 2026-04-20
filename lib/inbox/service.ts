@@ -6,6 +6,7 @@ import {
 import { fetchReadableSnapshot } from "@/lib/content/readability";
 import { canonicalizeUrl } from "@/lib/content/url";
 import {
+  clearItemAiFeatures,
   clearItemInterests,
   getAppConfig,
   getEmailById,
@@ -21,7 +22,9 @@ import {
   refreshEmailCounts,
   setEmailGmailSyncPending,
   setSyncState,
+  updateAppConfigAiFeaturePrompt,
   updateAppConfigPrompt,
+  updateItemAiFeature,
   updateItemInterest,
   updateItemUrls,
   upsertParsedEmail,
@@ -32,6 +35,12 @@ import {
 } from "@/lib/db/repository";
 import { pickDigestSource } from "@/lib/digest";
 import type { ParsedDigestEmail, ParsedDigestItem } from "@/lib/digest/types";
+import {
+  FixtureAiFeatureClassifier,
+  OpenAIAiFeatureClassifier,
+  type AiFeatureClassifier,
+} from "@/lib/inbox/ai-feature-classifier";
+import { normalizeAiFeaturePrompt } from "@/lib/inbox/ai-feature";
 import {
   FixtureInterestClassifier,
   OpenAIInterestClassifier,
@@ -48,6 +57,7 @@ let syncPromise: Promise<void> | null = null;
 export type InboxServices = {
   mailProvider: MailProvider;
   interestClassifier: InterestClassifier;
+  aiFeatureClassifier: AiFeatureClassifier;
 };
 
 export type SyncInboxOptions = {
@@ -58,9 +68,12 @@ export type SyncInboxOptions = {
 export type InboxAppConfig = {
   interestPrompt: string;
   interestPromptVersion: number;
+  aiFeaturePrompt: string;
+  aiFeaturePromptVersion: number;
   openAiApiKeyConfigured: boolean;
   openAiModel: string;
   interestRefreshPendingCount: number;
+  aiFeatureRefreshPendingCount: number;
 };
 
 export function createInboxServices(
@@ -79,38 +92,76 @@ export function createInboxServices(
       (useFixtures
         ? new FixtureInterestClassifier()
         : new OpenAIInterestClassifier()),
+    aiFeatureClassifier:
+      overrides.aiFeatureClassifier ??
+      (useFixtures
+        ? new FixtureAiFeatureClassifier()
+        : new OpenAIAiFeatureClassifier()),
   };
 }
 
 function decorateInboxEmails(emails: InboxEmail[], appConfig: AppConfigRecord) {
-  const hasPrompt = normalizeInterestPrompt(appConfig.interestPrompt) != null;
+  const hasInterestPrompt =
+    normalizeInterestPrompt(appConfig.interestPrompt) != null;
+  const hasAiFeaturePrompt =
+    normalizeAiFeaturePrompt(appConfig.aiFeaturePrompt) != null;
   let interestRefreshPendingCount = 0;
+  let aiFeatureRefreshPendingCount = 0;
 
   const decoratedEmails = emails.map((email) => ({
     ...email,
     items: email.items.map((item) => {
       const interestNeedsRefresh =
-        hasPrompt &&
+        hasInterestPrompt &&
         item.interestPromptVersion !== appConfig.interestPromptVersion;
+      const aiFeatureNeedsRefresh =
+        hasAiFeaturePrompt &&
+        item.aiFeaturePromptVersion !== appConfig.aiFeaturePromptVersion;
 
       if (interestNeedsRefresh) {
         interestRefreshPendingCount += 1;
       }
 
-      if (!hasPrompt || interestNeedsRefresh) {
-        return {
-          ...item,
-          interestStatus: "unclassified" as const,
-          interestReason: null,
-          interestModel: null,
-          interestClassifiedAt: null,
-          interestNeedsRefresh,
-        };
+      if (aiFeatureNeedsRefresh) {
+        aiFeatureRefreshPendingCount += 1;
       }
 
       return {
         ...item,
+        interestStatus:
+          !hasInterestPrompt || interestNeedsRefresh
+            ? ("unclassified" as const)
+            : item.interestStatus,
+        interestReason:
+          !hasInterestPrompt || interestNeedsRefresh
+            ? null
+            : item.interestReason,
+        interestModel:
+          !hasInterestPrompt || interestNeedsRefresh
+            ? null
+            : item.interestModel,
+        interestClassifiedAt:
+          !hasInterestPrompt || interestNeedsRefresh
+            ? null
+            : item.interestClassifiedAt,
         interestNeedsRefresh,
+        aiFeatureStatus:
+          !hasAiFeaturePrompt || aiFeatureNeedsRefresh
+            ? ("unclassified" as const)
+            : item.aiFeatureStatus,
+        aiFeatureReason:
+          !hasAiFeaturePrompt || aiFeatureNeedsRefresh
+            ? null
+            : item.aiFeatureReason,
+        aiFeatureModel:
+          !hasAiFeaturePrompt || aiFeatureNeedsRefresh
+            ? null
+            : item.aiFeatureModel,
+        aiFeatureClassifiedAt:
+          !hasAiFeaturePrompt || aiFeatureNeedsRefresh
+            ? null
+            : item.aiFeatureClassifiedAt,
+        aiFeatureNeedsRefresh,
       };
     }),
   }));
@@ -118,19 +169,24 @@ function decorateInboxEmails(emails: InboxEmail[], appConfig: AppConfigRecord) {
   return {
     emails: decoratedEmails,
     interestRefreshPendingCount,
+    aiFeatureRefreshPendingCount,
   };
 }
 
 function toInboxAppConfig(
   appConfig: AppConfigRecord,
   interestRefreshPendingCount: number,
+  aiFeatureRefreshPendingCount: number,
 ): InboxAppConfig {
   return {
     interestPrompt: appConfig.interestPrompt ?? "",
     interestPromptVersion: appConfig.interestPromptVersion,
+    aiFeaturePrompt: appConfig.aiFeaturePrompt ?? "",
+    aiFeaturePromptVersion: appConfig.aiFeaturePromptVersion,
     openAiApiKeyConfigured: Boolean(OPENAI_API_KEY),
     openAiModel: OPENAI_MODEL,
     interestRefreshPendingCount,
+    aiFeatureRefreshPendingCount,
   };
 }
 
@@ -246,6 +302,39 @@ async function classifyParsedEmail(
   };
 }
 
+async function buildAiFeatureListForStoredItems(
+  appConfig: AppConfigRecord,
+  services: InboxServices,
+  options: {
+    includeResolvedItems: boolean;
+  },
+) {
+  const prompt = normalizeAiFeaturePrompt(appConfig.aiFeaturePrompt);
+  const storedInputs = await listItemInterestInputs({
+    includeResolved: options.includeResolvedItems,
+  });
+
+  if (!prompt) {
+    await clearItemAiFeatures();
+    return;
+  }
+
+  await mapWithConcurrency(
+    storedInputs,
+    INTEREST_CLASSIFICATION_CONCURRENCY,
+    async (input) => {
+      const classification = await services.aiFeatureClassifier.classifyLink(
+        input,
+        appConfig,
+        {
+          model: OPENAI_MODEL,
+        },
+      );
+      await updateItemAiFeature(input.itemId, classification);
+    },
+  );
+}
+
 async function syncCompletedEmailReadState(
   emailId: number,
   services: InboxServices,
@@ -287,6 +376,7 @@ export async function getInboxPayload(services: Partial<InboxServices> = {}) {
     appConfig: toInboxAppConfig(
       appConfig,
       decorated.interestRefreshPendingCount,
+      decorated.aiFeatureRefreshPendingCount,
     ),
   };
 }
@@ -300,6 +390,18 @@ export async function updateInterestPrompt(prompt: string | null | undefined) {
   }
 
   await updateAppConfigPrompt(normalizedPrompt);
+  return getInboxPayload();
+}
+
+export async function updateAiFeaturePrompt(prompt: string | null | undefined) {
+  const normalizedPrompt = normalizeAiFeaturePrompt(prompt);
+  if (normalizedPrompt && !OPENAI_API_KEY) {
+    throw new Error(
+      "OPENAI_API_KEY must be configured before saving an AI feature prompt.",
+    );
+  }
+
+  await updateAppConfigAiFeaturePrompt(normalizedPrompt);
   return getInboxPayload();
 }
 
@@ -518,6 +620,33 @@ export async function syncInbox(
   })();
 
   return syncPromise;
+}
+
+export async function buildAiFeatureList(
+  services: Partial<InboxServices> = {},
+  options: {
+    includeResolvedItems?: boolean;
+  } = {},
+) {
+  const resolvedServices = resolveInboxServices(services);
+  const appConfig = await getAppConfig();
+  const prompt = normalizeAiFeaturePrompt(appConfig.aiFeaturePrompt);
+
+  if (!prompt) {
+    throw new Error("Set an AI feature prompt before building the list.");
+  }
+
+  if (!OPENAI_API_KEY) {
+    throw new Error(
+      "OPENAI_API_KEY must be configured before building the AI feature list.",
+    );
+  }
+
+  await buildAiFeatureListForStoredItems(appConfig, resolvedServices, {
+    includeResolvedItems: options.includeResolvedItems === true,
+  });
+
+  return getInboxPayload(resolvedServices);
 }
 
 export async function openItem(itemId: number) {

@@ -147,6 +147,78 @@ test("saves an interest prompt and filters flat links by classification", async 
   ).toBeVisible();
 });
 
+test("builds a separate AI feature list and can include resolved links", async ({
+  page,
+}) => {
+  await page.goto("/");
+
+  await page
+    .getByPlaceholder(
+      /Describe which AI product capabilities should make it into the separate watchlist/i,
+    )
+    .fill("openai claude anthropic roadmap panels");
+  await page.getByRole("button", { name: /Save AI list prompt/i }).click();
+  await expect(page.getByText(/AI feature prompt saved/i)).toBeVisible();
+
+  await page.getByRole("button", { name: /Build AI feature list/i }).click();
+  await expect(
+    page.getByRole("button", { name: /AI list/i }).first(),
+  ).toBeVisible({ timeout: 20_000 });
+  await expect(
+    page.getByRole("link", {
+      name: /OpenAI sharpens its enterprise roadmap \(3 minute read\)/i,
+    }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", {
+      name: /Claude adds role-aware control panels \(4 minute read\)/i,
+    }),
+  ).toBeVisible();
+
+  await page
+    .getByRole("button", { name: /Email view/i })
+    .first()
+    .click();
+  await page
+    .getByRole("button", {
+      name: /OpenAI roadmap .* Claude control panels .* new eval tooling/i,
+    })
+    .click();
+  await page
+    .getByRole("checkbox", {
+      name: /Resolve OpenAI sharpens its enterprise roadmap/i,
+    })
+    .click();
+
+  await page
+    .getByRole("button", { name: /AI list/i })
+    .first()
+    .click();
+  await expect(
+    page.getByRole("link", {
+      name: /OpenAI sharpens its enterprise roadmap \(3 minute read\)/i,
+    }),
+  ).toHaveCount(0);
+
+  await page
+    .getByLabel(/Include resolved links/i)
+    .last()
+    .click();
+  await page.getByRole("button", { name: /Build AI feature list/i }).click();
+  await expect(
+    page.getByRole("link", {
+      name: /OpenAI sharpens its enterprise roadmap \(3 minute read\)/i,
+    }),
+  ).toBeVisible({ timeout: 20_000 });
+
+  await page.getByRole("button", { name: /Undo/i }).click();
+  await expect(
+    page.getByRole("link", {
+      name: /OpenAI sharpens its enterprise roadmap \(3 minute read\)/i,
+    }),
+  ).toBeVisible();
+});
+
 test("opens email detail as a mobile master-detail view", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");

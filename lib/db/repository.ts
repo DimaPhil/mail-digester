@@ -10,6 +10,12 @@ import {
 } from "@/lib/db/schema";
 import type { ParsedDigestEmail } from "@/lib/digest/types";
 import {
+  normalizeAiFeaturePrompt,
+  type AiFeatureClassification,
+  type AiFeatureStatus,
+  UNCLASSIFIED_AI_FEATURE,
+} from "@/lib/inbox/ai-feature";
+import {
   normalizeInterestPrompt,
   type ItemInterestClassification,
   type ItemInterestStatus,
@@ -46,6 +52,12 @@ export type InboxEmailItem = {
   interestPromptVersion: number | null;
   interestClassifiedAt: number | null;
   interestNeedsRefresh: boolean;
+  aiFeatureStatus: AiFeatureStatus;
+  aiFeatureReason: string | null;
+  aiFeatureModel: string | null;
+  aiFeaturePromptVersion: number | null;
+  aiFeatureClassifiedAt: number | null;
+  aiFeatureNeedsRefresh: boolean;
   resolvedAt: number | null;
 };
 
@@ -192,6 +204,29 @@ export async function updateAppConfigPrompt(
   return getAppConfig();
 }
 
+export async function updateAppConfigAiFeaturePrompt(
+  prompt: string | null | undefined,
+): Promise<AppConfigRecord> {
+  const db = getDb();
+  const current = await getAppConfig();
+  const nextPrompt = normalizeAiFeaturePrompt(prompt);
+  const nextVersion =
+    nextPrompt === current.aiFeaturePrompt
+      ? current.aiFeaturePromptVersion
+      : current.aiFeaturePromptVersion + 1;
+
+  await db
+    .update(appConfig)
+    .set({
+      aiFeaturePrompt: nextPrompt,
+      aiFeaturePromptVersion: nextVersion,
+      updatedAt: nowTs(),
+    })
+    .where(eq(appConfig.id, 1));
+
+  return getAppConfig();
+}
+
 export async function upsertParsedEmail(
   parsed: ParsedDigestEmail,
   options?: { preserveResolvedItemInterests?: boolean },
@@ -263,8 +298,16 @@ export async function upsertParsedEmail(
             interestModel: existingItem.interestModel,
             interestPromptVersion: existingItem.interestPromptVersion,
             interestClassifiedAt: existingItem.interestClassifiedAt,
+            aiFeatureStatus: existingItem.aiFeatureStatus as AiFeatureStatus,
+            aiFeatureReason: existingItem.aiFeatureReason,
+            aiFeatureModel: existingItem.aiFeatureModel,
+            aiFeaturePromptVersion: existingItem.aiFeaturePromptVersion,
+            aiFeatureClassifiedAt: existingItem.aiFeatureClassifiedAt,
           }
-        : (item.interest ?? UNCLASSIFIED_ITEM_INTEREST);
+        : {
+            ...(item.interest ?? UNCLASSIFIED_ITEM_INTEREST),
+            ...(item.aiFeature ?? UNCLASSIFIED_AI_FEATURE),
+          };
     await db
       .insert(items)
       .values({
@@ -284,6 +327,11 @@ export async function upsertParsedEmail(
         interestModel: interest.interestModel,
         interestPromptVersion: interest.interestPromptVersion,
         interestClassifiedAt: interest.interestClassifiedAt,
+        aiFeatureStatus: interest.aiFeatureStatus,
+        aiFeatureReason: interest.aiFeatureReason,
+        aiFeatureModel: interest.aiFeatureModel,
+        aiFeaturePromptVersion: interest.aiFeaturePromptVersion,
+        aiFeatureClassifiedAt: interest.aiFeatureClassifiedAt,
         createdAt: timestamp,
         updatedAt: timestamp,
       })
@@ -304,6 +352,11 @@ export async function upsertParsedEmail(
           interestModel: interest.interestModel,
           interestPromptVersion: interest.interestPromptVersion,
           interestClassifiedAt: interest.interestClassifiedAt,
+          aiFeatureStatus: interest.aiFeatureStatus,
+          aiFeatureReason: interest.aiFeatureReason,
+          aiFeatureModel: interest.aiFeatureModel,
+          aiFeaturePromptVersion: interest.aiFeaturePromptVersion,
+          aiFeatureClassifiedAt: interest.aiFeatureClassifiedAt,
           updatedAt: timestamp,
         },
       });
@@ -367,7 +420,9 @@ export async function listInboxEmails() {
       .map((item) => ({
         ...item,
         interestStatus: item.interestStatus as ItemInterestStatus,
+        aiFeatureStatus: item.aiFeatureStatus as AiFeatureStatus,
         interestNeedsRefresh: false,
+        aiFeatureNeedsRefresh: false,
       })),
   }));
 }
@@ -455,6 +510,24 @@ export async function updateItemInterest(
     .where(eq(items.id, itemId));
 }
 
+export async function updateItemAiFeature(
+  itemId: number,
+  classification: AiFeatureClassification,
+) {
+  const db = getDb();
+  await db
+    .update(items)
+    .set({
+      aiFeatureStatus: classification.aiFeatureStatus,
+      aiFeatureReason: classification.aiFeatureReason,
+      aiFeatureModel: classification.aiFeatureModel,
+      aiFeaturePromptVersion: classification.aiFeaturePromptVersion,
+      aiFeatureClassifiedAt: classification.aiFeatureClassifiedAt,
+      updatedAt: nowTs(),
+    })
+    .where(eq(items.id, itemId));
+}
+
 export async function clearItemInterests() {
   const db = getDb();
   await db.update(items).set({
@@ -463,6 +536,18 @@ export async function clearItemInterests() {
     interestModel: UNCLASSIFIED_ITEM_INTEREST.interestModel,
     interestPromptVersion: UNCLASSIFIED_ITEM_INTEREST.interestPromptVersion,
     interestClassifiedAt: UNCLASSIFIED_ITEM_INTEREST.interestClassifiedAt,
+    updatedAt: nowTs(),
+  });
+}
+
+export async function clearItemAiFeatures() {
+  const db = getDb();
+  await db.update(items).set({
+    aiFeatureStatus: UNCLASSIFIED_AI_FEATURE.aiFeatureStatus,
+    aiFeatureReason: UNCLASSIFIED_AI_FEATURE.aiFeatureReason,
+    aiFeatureModel: UNCLASSIFIED_AI_FEATURE.aiFeatureModel,
+    aiFeaturePromptVersion: UNCLASSIFIED_AI_FEATURE.aiFeaturePromptVersion,
+    aiFeatureClassifiedAt: UNCLASSIFIED_AI_FEATURE.aiFeatureClassifiedAt,
     updatedAt: nowTs(),
   });
 }

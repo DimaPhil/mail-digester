@@ -61,6 +61,15 @@ export const items = sqliteTable(
     interestClassifiedAt: integer("interest_classified_at", {
       mode: "number",
     }),
+    aiFeatureStatus: text("ai_feature_status")
+      .notNull()
+      .default("unclassified"),
+    aiFeatureReason: text("ai_feature_reason"),
+    aiFeatureModel: text("ai_feature_model"),
+    aiFeaturePromptVersion: integer("ai_feature_prompt_version"),
+    aiFeatureClassifiedAt: integer("ai_feature_classified_at", {
+      mode: "number",
+    }),
     resolvedAt: integer("resolved_at", { mode: "number" }),
     createdAt: integer("created_at", { mode: "number" }).notNull(),
     updatedAt: integer("updated_at", { mode: "number" }).notNull(),
@@ -75,6 +84,11 @@ export const items = sqliteTable(
       table.resolvedAt,
       table.interestPromptVersion,
     ),
+    aiFeatureStatusIdx: index("items_ai_feature_status_idx").on(
+      table.aiFeatureStatus,
+      table.resolvedAt,
+      table.aiFeaturePromptVersion,
+    ),
   }),
 );
 
@@ -82,6 +96,10 @@ export const appConfig = sqliteTable("app_config", {
   id: integer("id").primaryKey(),
   interestPrompt: text("interest_prompt"),
   interestPromptVersion: integer("interest_prompt_version")
+    .notNull()
+    .default(0),
+  aiFeaturePrompt: text("ai_feature_prompt"),
+  aiFeaturePromptVersion: integer("ai_feature_prompt_version")
     .notNull()
     .default(0),
   createdAt: integer("created_at", { mode: "number" }).notNull(),

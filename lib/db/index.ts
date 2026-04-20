@@ -85,6 +85,11 @@ function initializeSchema() {
       interest_model TEXT,
       interest_prompt_version INTEGER,
       interest_classified_at INTEGER,
+      ai_feature_status TEXT NOT NULL DEFAULT 'unclassified',
+      ai_feature_reason TEXT,
+      ai_feature_model TEXT,
+      ai_feature_prompt_version INTEGER,
+      ai_feature_classified_at INTEGER,
       resolved_at INTEGER,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
@@ -95,6 +100,9 @@ function initializeSchema() {
 
     CREATE INDEX IF NOT EXISTS items_interest_status_idx
     ON items(interest_status, resolved_at, interest_prompt_version);
+
+    CREATE INDEX IF NOT EXISTS items_ai_feature_status_idx
+    ON items(ai_feature_status, resolved_at, ai_feature_prompt_version);
 
     CREATE TABLE IF NOT EXISTS article_snapshots (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -167,6 +175,8 @@ function initializeSchema() {
       id INTEGER PRIMARY KEY,
       interest_prompt TEXT,
       interest_prompt_version INTEGER NOT NULL DEFAULT 0,
+      ai_feature_prompt TEXT,
+      ai_feature_prompt_version INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -181,6 +191,11 @@ function initializeSchema() {
     ["interest_model", "TEXT"],
     ["interest_prompt_version", "INTEGER"],
     ["interest_classified_at", "INTEGER"],
+    ["ai_feature_status", "TEXT NOT NULL DEFAULT 'unclassified'"],
+    ["ai_feature_reason", "TEXT"],
+    ["ai_feature_model", "TEXT"],
+    ["ai_feature_prompt_version", "INTEGER"],
+    ["ai_feature_classified_at", "INTEGER"],
   ] as const;
 
   for (const [name, definition] of itemColumnDefinitions) {
@@ -197,6 +212,10 @@ function initializeSchema() {
     CREATE INDEX IF NOT EXISTS items_interest_status_idx
     ON items(interest_status, resolved_at, interest_prompt_version)
   `);
+  instance.sqlite.exec(`
+    CREATE INDEX IF NOT EXISTS items_ai_feature_status_idx
+    ON items(ai_feature_status, resolved_at, ai_feature_prompt_version)
+  `);
 
   const syncStateColumns = instance.sqlite
     .prepare("PRAGMA table_info(sync_state)")
@@ -210,6 +229,24 @@ function initializeSchema() {
       ALTER TABLE sync_state
       ADD COLUMN last_successful_sync_started_at INTEGER
     `);
+  }
+
+  const appConfigColumns = instance.sqlite
+    .prepare("PRAGMA table_info(app_config)")
+    .all() as Array<{ name: string }>;
+  const appConfigColumnDefinitions = [
+    ["ai_feature_prompt", "TEXT"],
+    ["ai_feature_prompt_version", "INTEGER NOT NULL DEFAULT 0"],
+  ] as const;
+
+  for (const [name, definition] of appConfigColumnDefinitions) {
+    const hasColumn = appConfigColumns.some((column) => column.name === name);
+    if (!hasColumn) {
+      instance.sqlite.exec(`
+        ALTER TABLE app_config
+        ADD COLUMN ${name} ${definition}
+      `);
+    }
   }
 
   instance.sqlite
@@ -228,9 +265,9 @@ function initializeSchema() {
     .prepare(
       `
       INSERT OR IGNORE INTO app_config (
-        id, interest_prompt, interest_prompt_version, created_at, updated_at
+        id, interest_prompt, interest_prompt_version, ai_feature_prompt, ai_feature_prompt_version, created_at, updated_at
       ) VALUES (
-        1, NULL, 0, ?, ?
+        1, NULL, 0, NULL, 0, ?, ?
       )
     `,
     )

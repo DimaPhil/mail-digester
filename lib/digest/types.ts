@@ -1,4 +1,5 @@
 import type { ProviderMessage } from "@/lib/mail/types";
+import type { AiFeatureClassification } from "@/lib/inbox/ai-feature";
 import type { ItemInterestClassification } from "@/lib/inbox/interest";
 
 export type ParsedDigestItemKind =
@@ -19,6 +20,7 @@ export type ParsedDigestItem = {
   canonicalUrl: string | null;
   finalUrl: string | null;
   interest?: ItemInterestClassification;
+  aiFeature?: AiFeatureClassification;
 };
 
 export type ParsedDigestEmail = {

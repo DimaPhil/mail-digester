@@ -1,14 +1,14 @@
 import {
-  FixtureInterestClassifier,
-  OpenAIInterestClassifier,
-} from "@/lib/inbox/interest-classifier";
+  FixtureAiFeatureClassifier,
+  OpenAIAiFeatureClassifier,
+} from "@/lib/inbox/ai-feature-classifier";
 
 const baseAppConfig = {
   id: 1,
-  interestPrompt: "openai",
-  interestPromptVersion: 3,
-  aiFeaturePrompt: null,
-  aiFeaturePromptVersion: 0,
+  interestPrompt: null,
+  interestPromptVersion: 0,
+  aiFeaturePrompt: "openai claude anthropic roadmap panels",
+  aiFeaturePromptVersion: 4,
   createdAt: Date.parse("2026-04-10T00:00:00Z"),
   updatedAt: Date.parse("2026-04-10T00:00:00Z"),
 };
@@ -32,39 +32,40 @@ const baseInput = {
   finalUrl: "https://example.com/1",
 };
 
-describe("interest classifier", () => {
+describe("ai feature classifier", () => {
   it("returns unclassified when no prompt is configured", async () => {
-    const classifier = new FixtureInterestClassifier();
+    const classifier = new FixtureAiFeatureClassifier();
 
     const result = await classifier.classifyLink(baseInput, {
       ...baseAppConfig,
-      interestPrompt: null,
+      aiFeaturePrompt: null,
     });
 
-    expect(result.interestStatus).toBe("unclassified");
-    expect(result.interestReason).toBeNull();
+    expect(result.aiFeatureStatus).toBe("unclassified");
+    expect(result.aiFeatureReason).toBeNull();
   });
 
-  it("classifies fixture links based on link-level prompt matches", async () => {
-    const classifier = new FixtureInterestClassifier();
+  it("classifies fixture links based on link-level watchlist matches", async () => {
+    const classifier = new FixtureAiFeatureClassifier();
 
-    const interesting = await classifier.classifyLink(baseInput, baseAppConfig);
-    const notInteresting = await classifier.classifyLink(
+    const included = await classifier.classifyLink(baseInput, baseAppConfig);
+    const excluded = await classifier.classifyLink(
       {
         ...baseInput,
         title: "Amazon escalates the infrastructure race",
         summary:
           "Amazon used its annual letter to frame custom silicon as the next moat.",
+        emailSubject: "Compute race",
       },
       baseAppConfig,
     );
 
-    expect(interesting.interestStatus).toBe("interesting");
-    expect(notInteresting.interestStatus).toBe("not_interesting");
+    expect(included.aiFeatureStatus).toBe("included");
+    expect(excluded.aiFeatureStatus).toBe("excluded");
   });
 
   it("throws when OpenAI classification is requested without an API key", async () => {
-    const classifier = new OpenAIInterestClassifier(null);
+    const classifier = new OpenAIAiFeatureClassifier(null);
 
     await expect(
       classifier.classifyLink(baseInput, baseAppConfig),
@@ -72,13 +73,13 @@ describe("interest classifier", () => {
   });
 
   it("uses parsed structured output from the OpenAI SDK", async () => {
-    const classifier = new OpenAIInterestClassifier("test-key") as any;
+    const classifier = new OpenAIAiFeatureClassifier("test-key") as any;
     classifier.client = {
       responses: {
         parse: vi.fn(async () => ({
           output_parsed: {
-            interesting: true,
-            reason: "Direct match with the saved prompt.",
+            included: true,
+            reason: "Concrete AI product capability from a tracked provider.",
           },
         })),
       },
@@ -88,9 +89,11 @@ describe("interest classifier", () => {
       model: "gpt-5.4",
     });
 
-    expect(result.interestStatus).toBe("interesting");
-    expect(result.interestReason).toBe("Direct match with the saved prompt.");
-    expect(result.interestModel).toBe("gpt-5.4");
-    expect(result.interestPromptVersion).toBe(3);
+    expect(result.aiFeatureStatus).toBe("included");
+    expect(result.aiFeatureReason).toBe(
+      "Concrete AI product capability from a tracked provider.",
+    );
+    expect(result.aiFeatureModel).toBe("gpt-5.4");
+    expect(result.aiFeaturePromptVersion).toBe(4);
   });
 });

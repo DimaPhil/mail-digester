@@ -37,7 +37,7 @@ type InterestFilter =
   | "not_interesting"
   | "unclassified";
 type SortDirection = "asc" | "desc";
-type ViewMode = "emails" | "flat";
+type ViewMode = "emails" | "flat" | "ai_list";
 
 const SUMMARY_PREVIEW_LIMIT = 260;
 
@@ -99,6 +99,33 @@ function interestTone(item: EmailItem): "accent" | "neutral" | "warning" {
   return "neutral";
 }
 
+function aiFeatureLabel(item: EmailItem) {
+  if (item.aiFeatureNeedsRefresh) {
+    return "Needs rebuild";
+  }
+
+  switch (item.aiFeatureStatus) {
+    case "included":
+      return "In AI list";
+    case "excluded":
+      return "Not in AI list";
+    default:
+      return "Unclassified";
+  }
+}
+
+function aiFeatureTone(item: EmailItem): "accent" | "neutral" | "warning" {
+  if (item.aiFeatureStatus === "included") {
+    return "accent";
+  }
+
+  if (item.aiFeatureStatus === "excluded") {
+    return "warning";
+  }
+
+  return "neutral";
+}
+
 async function readJson<T>(input: RequestInfo, init?: RequestInit) {
   const response = await fetch(input, init);
   const payload = (await response.json()) as T;
@@ -134,10 +161,19 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
   const [interestPromptDraft, setInterestPromptDraft] = useState(
     initialData.appConfig.interestPrompt,
   );
+  const [aiFeaturePromptDraft, setAiFeaturePromptDraft] = useState(
+    initialData.appConfig.aiFeaturePrompt,
+  );
+  const [aiFeatureIncludeResolved, setAiFeatureIncludeResolved] =
+    useState(false);
   const [keepRecentDays, setKeepRecentDays] = useState("7");
   const [configPending, setConfigPending] = useState(false);
   const [bulkResolvePending, setBulkResolvePending] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
+  const [aiFeaturePending, setAiFeaturePending] = useState(false);
+  const [aiFeatureFeedbackMessage, setAiFeatureFeedbackMessage] = useState<
+    string | null
+  >(null);
   const [hydrated, setHydrated] = useState(false);
   const [forceFullResync, setForceFullResync] = useState(false);
   const [includeResolvedItemsInRecheck, setIncludeResolvedItemsInRecheck] =
@@ -224,6 +260,31 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
           return dateDelta || a.item.position - b.item.position;
         }),
     [activeEmails, interestFilter, sortDirection],
+  );
+
+  const aiFeatureItems = useMemo(
+    () =>
+      visibleEmails
+        .flatMap((email) =>
+          email.items
+            .filter(
+              (item) =>
+                item.aiFeatureStatus === "included" &&
+                (aiFeatureIncludeResolved || item.resolvedAt == null),
+            )
+            .map((item) => ({
+              email,
+              item,
+            })),
+        )
+        .sort((a, b) => {
+          const dateDelta =
+            sortDirection === "asc"
+              ? a.email.receivedAt - b.email.receivedAt
+              : b.email.receivedAt - a.email.receivedAt;
+          return dateDelta || a.item.position - b.item.position;
+        }),
+    [aiFeatureIncludeResolved, sortDirection, visibleEmails],
   );
 
   const selectedEmail =
@@ -353,6 +414,10 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
   useEffect(() => {
     setInterestPromptDraft(appConfig.interestPrompt);
   }, [appConfig.interestPrompt]);
+
+  useEffect(() => {
+    setAiFeaturePromptDraft(appConfig.aiFeaturePrompt);
+  }, [appConfig.aiFeaturePrompt]);
 
   function stopPolling() {
     if (pollTimer.current != null) {
@@ -695,6 +760,33 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     }
   }
 
+  async function saveAiFeaturePrompt() {
+    setConfigPending(true);
+    setAiFeatureFeedbackMessage(null);
+
+    try {
+      const payload = await readJson<InboxPayload>("/api/config", {
+        body: JSON.stringify({
+          aiFeaturePrompt: aiFeaturePromptDraft,
+        }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      setEmails(applyOptimisticResolutions(payload.emails));
+      setSync(payload.sync);
+      setAppConfig(payload.appConfig);
+      setAiFeatureFeedbackMessage("AI feature prompt saved.");
+    } catch (error) {
+      setAiFeatureFeedbackMessage(
+        error instanceof Error ? error.message : "Failed to save prompt.",
+      );
+    } finally {
+      setConfigPending(false);
+    }
+  }
+
   async function bulkResolveNotInteresting() {
     const parsedDays = Number(keepRecentDays);
     if (!Number.isFinite(parsedDays) || parsedDays < 0) {
@@ -734,6 +826,40 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
       );
     } finally {
       setBulkResolvePending(false);
+    }
+  }
+
+  async function runAiFeatureListBuild() {
+    setAiFeaturePending(true);
+    setAiFeatureFeedbackMessage(null);
+
+    try {
+      const payload = await readJson<InboxPayload>("/api/ai-feature-list", {
+        body: JSON.stringify({
+          includeResolvedItems: aiFeatureIncludeResolved,
+        }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+        method: "POST",
+      });
+      setEmails(applyOptimisticResolutions(payload.emails));
+      setSync(payload.sync);
+      setAppConfig(payload.appConfig);
+      setViewMode("ai_list");
+      setAiFeatureFeedbackMessage(
+        aiFeatureIncludeResolved
+          ? "AI feature list rebuilt for active and resolved links."
+          : "AI feature list rebuilt for active links.",
+      );
+    } catch (error) {
+      setAiFeatureFeedbackMessage(
+        error instanceof Error
+          ? error.message
+          : "Failed to build AI feature list.",
+      );
+    } finally {
+      setAiFeaturePending(false);
     }
   }
 
@@ -838,6 +964,18 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
         >
           Flat links
         </button>
+        <button
+          className={cn(
+            "rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] transition",
+            viewMode === "ai_list"
+              ? "border-[var(--accent)] bg-white text-[var(--accent-strong)]"
+              : "border-[var(--border)] bg-[var(--panel-strong)] text-[var(--muted)] hover:border-[var(--accent)]",
+          )}
+          onClick={() => setViewMode("ai_list")}
+          type="button"
+        >
+          AI list
+        </button>
       </div>
     );
   }
@@ -877,7 +1015,17 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     );
   }
 
-  function renderFlatItemCard(email: EmailRecord, item: EmailItem) {
+  function renderFlatItemCard(
+    email: EmailRecord,
+    item: EmailItem,
+    options: {
+      badgeLabel: string;
+      badgeTone: "accent" | "neutral" | "warning";
+      reason: string | null;
+      reasonLabel: string;
+      showResolvedStatus?: boolean;
+    },
+  ) {
     const isResolving = resolvingIds.includes(item.id);
     const href = item.finalUrl ?? item.canonicalUrl ?? item.trackedUrl;
     const summaryExpanded = expandedSummaryIds.has(item.id);
@@ -933,12 +1081,12 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                 label={item.itemKind}
                 tone={item.itemKind === "sponsor" ? "warning" : "neutral"}
               />
-              <StatusChip
-                label={interestLabel(item)}
-                tone={interestTone(item)}
-              />
+              <StatusChip label={options.badgeLabel} tone={options.badgeTone} />
               {item.readTimeText ? (
                 <StatusChip label={item.readTimeText} tone="neutral" />
+              ) : null}
+              {options.showResolvedStatus && item.resolvedAt != null ? (
+                <StatusChip label="Resolved" tone="neutral" />
               ) : null}
             </div>
 
@@ -949,9 +1097,9 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
               <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--muted)]">
                 {visibleSummary}
               </p>
-              {item.interestReason ? (
+              {options.reason ? (
                 <p className="mt-3 text-sm leading-6 text-[var(--text)]">
-                  Why: {item.interestReason}
+                  {options.reasonLabel}: {options.reason}
                 </p>
               ) : null}
               {hasLongSummary ? (
@@ -1033,7 +1181,88 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
             </div>
           ) : null}
 
-          {flatItems.map(({ email, item }) => renderFlatItemCard(email, item))}
+          {flatItems.map(({ email, item }) =>
+            renderFlatItemCard(email, item, {
+              badgeLabel: interestLabel(item),
+              badgeTone: interestTone(item),
+              reason: item.interestReason,
+              reasonLabel: "Why",
+            }),
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  function renderAiListView() {
+    return (
+      <div className="rounded-[30px] border border-[var(--border)] bg-[var(--panel)] backdrop-blur">
+        <div className="flex flex-col gap-4 border-b border-[var(--border)] px-5 py-4 md:px-6">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="text-sm font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
+                AI feature list
+              </div>
+              <div className="text-sm text-[var(--muted)]">
+                A separate watchlist of links that describe practical AI product
+                capabilities, especially from major providers and major
+                platforms shipping usable AI features.
+              </div>
+            </div>
+            <div className="rounded-full bg-white px-3 py-1 text-sm font-medium shadow-sm">
+              {aiFeatureItems.length}
+            </div>
+          </div>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap items-center gap-3">
+              {renderSortControls()}
+              <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-[var(--muted)]">
+                <Checkbox.Root
+                  checked={aiFeatureIncludeResolved}
+                  className="inline-flex h-5 w-5 items-center justify-center rounded border border-[var(--border)] bg-white transition hover:border-[var(--accent)]"
+                  onCheckedChange={(checked) =>
+                    setAiFeatureIncludeResolved(checked === true)
+                  }
+                >
+                  <Checkbox.Indicator>
+                    <Check className="h-3.5 w-3.5 text-[var(--accent)]" />
+                  </Checkbox.Indicator>
+                </Checkbox.Root>
+                Include resolved links
+              </label>
+            </div>
+            {renderViewControls()}
+          </div>
+        </div>
+
+        <div className="space-y-4 p-4 md:p-5">
+          {aiFeatureItems.length === 0 ? (
+            <div className="rounded-[24px] border border-dashed border-[var(--border)] bg-white/65 p-8 text-center">
+              <MailCheck className="mx-auto h-10 w-10 text-[var(--accent)]" />
+              <h2 className="mt-4 font-[var(--font-source-serif)] text-2xl">
+                {appConfig.aiFeaturePrompt.trim()
+                  ? "No AI feature matches yet"
+                  : "Set an AI feature prompt first"}
+              </h2>
+              <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[var(--muted)]">
+                {appConfig.aiFeaturePrompt.trim()
+                  ? appConfig.aiFeatureRefreshPendingCount > 0
+                    ? "Save the prompt and rebuild the list to classify links with the latest rules."
+                    : "Run the dedicated AI list build to populate this watchlist."
+                  : "Describe the kinds of AI product capabilities you want to track, then run the separate list builder."}
+              </p>
+            </div>
+          ) : null}
+
+          {aiFeatureItems.map(({ email, item }) =>
+            renderFlatItemCard(email, item, {
+              badgeLabel: aiFeatureLabel(item),
+              badgeTone: aiFeatureTone(item),
+              reason: item.aiFeatureReason,
+              reasonLabel: "List reason",
+              showResolvedStatus: true,
+            }),
+          )}
         </div>
       </div>
     );
@@ -1594,9 +1823,92 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                       </button>
                     </div>
                   </div>
+                  <div className="mt-4 border-t border-[var(--border)] pt-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {appConfig.aiFeatureRefreshPendingCount > 0 ? (
+                        <StatusChip
+                          label={`${appConfig.aiFeatureRefreshPendingCount} link${appConfig.aiFeatureRefreshPendingCount === 1 ? "" : "s"} need AI list rebuild`}
+                          tone="warning"
+                        />
+                      ) : null}
+                    </div>
+                    <div className="mt-3 text-sm font-semibold text-[var(--text)]">
+                      AI feature list prompt
+                    </div>
+                    <p className="mt-1 text-sm leading-6 text-[var(--muted)]">
+                      This is a separate manual list builder. It scans stored
+                      links and keeps only the ones that describe practical AI
+                      product capabilities worth tracking.
+                    </p>
+                    <textarea
+                      className="mt-3 min-h-32 w-full rounded-[18px] border border-[var(--border)] bg-[var(--panel-strong)] px-4 py-3 text-sm leading-6 text-[var(--text)] outline-none transition focus:border-[var(--accent)]"
+                      disabled={configPending || aiFeaturePending}
+                      onChange={(event) =>
+                        setAiFeaturePromptDraft(event.target.value)
+                      }
+                      placeholder="Describe which AI product capabilities should make it into the separate watchlist."
+                      value={aiFeaturePromptDraft}
+                    />
+                    <div className="mt-3 flex flex-wrap items-center gap-3">
+                      <button
+                        className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-white px-4 py-2 text-sm font-medium shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={configPending || aiFeaturePending}
+                        onClick={() => void saveAiFeaturePrompt()}
+                        type="button"
+                      >
+                        {configPending ? (
+                          <LoaderCircle className="h-4 w-4 animate-spin" />
+                        ) : null}
+                        Save AI list prompt
+                      </button>
+                      {appConfig.aiFeatureRefreshPendingCount > 0 ? (
+                        <span className="text-xs text-[var(--muted)]">
+                          Rebuild the list to reclassify stored links with the
+                          latest prompt.
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="mt-4 flex flex-col gap-3 rounded-[18px] border border-[var(--border)] bg-[var(--panel-strong)] p-4">
+                      <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-[var(--muted)]">
+                        <Checkbox.Root
+                          checked={aiFeatureIncludeResolved}
+                          className="inline-flex h-5 w-5 items-center justify-center rounded border border-[var(--border)] bg-white transition hover:border-[var(--accent)]"
+                          disabled={aiFeaturePending}
+                          onCheckedChange={(checked) =>
+                            setAiFeatureIncludeResolved(checked === true)
+                          }
+                        >
+                          <Checkbox.Indicator>
+                            <Check className="h-3.5 w-3.5 text-[var(--accent)]" />
+                          </Checkbox.Indicator>
+                        </Checkbox.Root>
+                        Include resolved links
+                      </label>
+                      <button
+                        className="inline-flex items-center justify-center gap-2 rounded-full border border-[var(--border)] bg-white px-4 py-2 text-sm font-medium shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={
+                          aiFeaturePending ||
+                          !appConfig.openAiApiKeyConfigured ||
+                          !appConfig.aiFeaturePrompt.trim()
+                        }
+                        onClick={() => void runAiFeatureListBuild()}
+                        type="button"
+                      >
+                        {aiFeaturePending ? (
+                          <LoaderCircle className="h-4 w-4 animate-spin" />
+                        ) : null}
+                        Build AI feature list
+                      </button>
+                    </div>
+                  </div>
                   {feedbackMessage ? (
                     <div className="mt-3 text-sm text-[var(--muted)]">
                       {feedbackMessage}
+                    </div>
+                  ) : null}
+                  {aiFeatureFeedbackMessage ? (
+                    <div className="mt-3 text-sm text-[var(--muted)]">
+                      {aiFeatureFeedbackMessage}
                     </div>
                   ) : null}
                 </div>
@@ -1748,8 +2060,10 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                 {renderEmailDetail()}
               </div>
             </>
-          ) : (
+          ) : viewMode === "flat" ? (
             renderFlatView()
+          ) : (
+            renderAiListView()
           )}
         </section>
 
