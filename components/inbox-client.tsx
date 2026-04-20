@@ -170,6 +170,8 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
   const [aiFeatureIncludeResolved, setAiFeatureIncludeResolved] =
     useState(false);
   const [keepRecentDays, setKeepRecentDays] = useState("7");
+  const [bulkResolveExcludeAiListItems, setBulkResolveExcludeAiListItems] =
+    useState(false);
   const [configPending, setConfigPending] = useState(false);
   const [bulkResolvePending, setBulkResolvePending] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
@@ -823,6 +825,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
         resolvedCount: number;
       }>("/api/items/resolve-not-interesting", {
         body: JSON.stringify({
+          excludeAiListItems: bulkResolveExcludeAiListItems,
           keepRecentDays: Math.floor(parsedDays),
           metadata: getInteractionMetadata(),
         }),
@@ -1875,6 +1878,21 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                         type="number"
                         value={keepRecentDays}
                       />
+                      <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-[var(--muted)]">
+                        <Checkbox.Root
+                          checked={bulkResolveExcludeAiListItems}
+                          className="inline-flex h-5 w-5 items-center justify-center rounded border border-[var(--border)] bg-white transition hover:border-[var(--accent)]"
+                          disabled={bulkResolvePending}
+                          onCheckedChange={(checked) =>
+                            setBulkResolveExcludeAiListItems(checked === true)
+                          }
+                        >
+                          <Checkbox.Indicator>
+                            <Check className="h-4 w-4 text-[var(--accent)]" />
+                          </Checkbox.Indicator>
+                        </Checkbox.Root>
+                        Keep AI list links unresolved
+                      </label>
                       <button
                         className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-white px-4 py-2 text-sm font-medium shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
                         disabled={

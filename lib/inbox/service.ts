@@ -868,6 +868,9 @@ export async function resolveItem(
 export async function resolveNonInterestingItems(
   keepRecentDays: number,
   services: Partial<InboxServices> = {},
+  options: {
+    excludeAiListItems?: boolean;
+  } = {},
   metadata: ItemInteractionMetadata = {},
 ) {
   const resolvedServices = resolveInboxServices(services);
@@ -885,6 +888,7 @@ export async function resolveNonInterestingItems(
   const candidates = await listNonInterestingBulkResolveCandidates({
     promptVersion: appConfig.interestPromptVersion,
     receivedBeforeTs,
+    excludeAiListItems: options.excludeAiListItems === true,
   });
 
   let resolvedCount = 0;
@@ -899,6 +903,7 @@ export async function resolveNonInterestingItems(
     await recordItemInteraction(candidate.itemId, "resolve", {
       ...metadata,
       bulkResolveMode: "not_interesting",
+      excludeAiListItems: options.excludeAiListItems === true,
       keepRecentDays: Math.floor(keepRecentDays),
     });
     resolvedCount += 1;

@@ -541,6 +541,47 @@ describe("Inbox service", () => {
     ).toBe(true);
   });
 
+  it("can keep AI list links unresolved during bulk resolve", async () => {
+    const { service } = await loadModules();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-11T12:00:00Z"));
+
+    await service.updateInterestPrompt("openai");
+    await service.updateAiFeaturePrompt("prototype production");
+    await service.syncInbox();
+    await service.buildAiFeatureList();
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const payload = await service.getInboxPayload();
+      if (!payload.aiFeatureBuild.active) {
+        break;
+      }
+
+      await Promise.resolve();
+    }
+
+    const result = await service.resolveNonInterestingItems(1, undefined, {
+      excludeAiListItems: true,
+    });
+    expect(result.resolvedCount).toBe(2);
+
+    const payload = await service.getInboxPayload();
+    const olderEmail = payload.emails.find(
+      (email) => email.providerMessageId === "fixture-main-001",
+    )!;
+    const sponsorItem = olderEmail.items.find((item) =>
+      item.title.includes("real-time AI humans"),
+    )!;
+
+    expect(sponsorItem.aiFeatureStatus).toBe("included");
+    expect(sponsorItem.interestStatus).toBe("not_interesting");
+    expect(sponsorItem.resolvedAt).toBeNull();
+    expect(
+      olderEmail.items
+        .filter((item) => item.id !== sponsorItem.id)
+        .every((item) => item.resolvedAt != null),
+    ).toBe(true);
+  });
+
   it("opens an item, extracts article content, and reuses the cached snapshot", async () => {
     const { service } = await loadModules();
 

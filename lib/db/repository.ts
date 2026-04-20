@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, lt } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, lt, ne } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import {
   aiFeatureBuildState,
@@ -535,6 +535,7 @@ export async function listItemInterestInputs(options?: {
 export async function listNonInterestingBulkResolveCandidates(input: {
   promptVersion: number;
   receivedBeforeTs: number;
+  excludeAiListItems?: boolean;
 }) {
   const db = getDb();
   return db
@@ -549,6 +550,9 @@ export async function listNonInterestingBulkResolveCandidates(input: {
         eq(items.interestStatus, "not_interesting"),
         eq(items.interestPromptVersion, input.promptVersion),
         isNull(items.resolvedAt),
+        input.excludeAiListItems
+          ? ne(items.aiFeatureStatus, "included")
+          : undefined,
         lt(emails.receivedAt, input.receivedBeforeTs),
       ),
     );
