@@ -8,6 +8,7 @@ import { canonicalizeUrl } from "@/lib/content/url";
 import {
   clearItemAiFeatures,
   clearItemInterests,
+  getAiFeatureBuildState,
   getAppConfig,
   getEmailById,
   getItemById,
@@ -20,6 +21,7 @@ import {
   markItemUnresolved,
   recordItemInteraction,
   refreshEmailCounts,
+  setAiFeatureBuildState,
   setEmailGmailSyncPending,
   setSyncState,
   updateAppConfigAiFeaturePrompt,
@@ -29,6 +31,7 @@ import {
   updateItemUrls,
   upsertParsedEmail,
   upsertSnapshot,
+  type AiFeatureBuildStateRecord,
   type AppConfigRecord,
   type InboxEmail,
   type ItemInteractionMetadata,
@@ -53,6 +56,7 @@ import type { MailProvider } from "@/lib/mail/types";
 import { nowTs } from "@/lib/utils";
 
 let syncPromise: Promise<void> | null = null;
+let aiFeatureBuildPromise: Promise<void> | null = null;
 
 export type InboxServices = {
   mailProvider: MailProvider;
@@ -75,6 +79,8 @@ export type InboxAppConfig = {
   interestRefreshPendingCount: number;
   aiFeatureRefreshPendingCount: number;
 };
+
+export type InboxAiFeatureBuildState = AiFeatureBuildStateRecord;
 
 export function createInboxServices(
   overrides: Partial<InboxServices> = {},
@@ -316,8 +322,14 @@ async function buildAiFeatureListForStoredItems(
 
   if (!prompt) {
     await clearItemAiFeatures();
-    return;
+    return {
+      processedCount: 0,
+      totalCount: 0,
+    };
   }
+
+  let processedCount = 0;
+  let progressUpdate = Promise.resolve();
 
   await mapWithConcurrency(
     storedInputs,
@@ -331,8 +343,30 @@ async function buildAiFeatureListForStoredItems(
         },
       );
       await updateItemAiFeature(input.itemId, classification);
+
+      processedCount += 1;
+      const nextProcessedCount = processedCount;
+      progressUpdate = progressUpdate.then(() =>
+        setAiFeatureBuildState({
+          status: "running",
+          phase: "classifying",
+          message: `Analyzed link ${nextProcessedCount} of ${storedInputs.length} for the AI list.`,
+          discoveredItems: storedInputs.length,
+          processedItems: nextProcessedCount,
+          active: true,
+          includeResolvedItems: options.includeResolvedItems,
+        }),
+      );
+      await progressUpdate;
     },
   );
+
+  await progressUpdate;
+
+  return {
+    processedCount,
+    totalCount: storedInputs.length,
+  };
 }
 
 async function syncCompletedEmailReadState(
@@ -356,9 +390,10 @@ async function syncCompletedEmailReadState(
 
 export async function getInboxPayload(services: Partial<InboxServices> = {}) {
   const resolvedServices = resolveInboxServices(services);
-  const [rawEmails, sync, appConfig] = await Promise.all([
+  const [rawEmails, sync, aiFeatureBuild, appConfig] = await Promise.all([
     listInboxEmails(),
     getSyncState(),
+    getAiFeatureBuildState(),
     getAppConfig(),
   ]);
   const decorated = decorateInboxEmails(rawEmails, appConfig);
@@ -372,6 +407,7 @@ export async function getInboxPayload(services: Partial<InboxServices> = {}) {
   return {
     emails: decorated.emails,
     sync,
+    aiFeatureBuild,
     shouldAutoSync,
     appConfig: toInboxAppConfig(
       appConfig,
@@ -628,9 +664,14 @@ export async function buildAiFeatureList(
     includeResolvedItems?: boolean;
   } = {},
 ) {
+  if (aiFeatureBuildPromise) {
+    return getInboxPayload(resolveInboxServices(services));
+  }
+
   const resolvedServices = resolveInboxServices(services);
   const appConfig = await getAppConfig();
   const prompt = normalizeAiFeaturePrompt(appConfig.aiFeaturePrompt);
+  const includeResolvedItems = options.includeResolvedItems === true;
 
   if (!prompt) {
     throw new Error("Set an AI feature prompt before building the list.");
@@ -642,9 +683,61 @@ export async function buildAiFeatureList(
     );
   }
 
-  await buildAiFeatureListForStoredItems(appConfig, resolvedServices, {
-    includeResolvedItems: options.includeResolvedItems === true,
+  const startedAt = nowTs();
+  await setAiFeatureBuildState({
+    status: "running",
+    phase: "listing",
+    message: includeResolvedItems
+      ? "Preparing the AI feature list from active and resolved links…"
+      : "Preparing the AI feature list from active links…",
+    discoveredItems: 0,
+    processedItems: 0,
+    active: true,
+    includeResolvedItems,
+    lastStartedAt: startedAt,
+    lastFinishedAt: null,
+    lastError: null,
   });
+
+  aiFeatureBuildPromise = (async () => {
+    try {
+      const { processedCount, totalCount } =
+        await buildAiFeatureListForStoredItems(appConfig, resolvedServices, {
+          includeResolvedItems,
+        });
+
+      await setAiFeatureBuildState({
+        status: "idle",
+        phase: "ready",
+        message:
+          totalCount === 0
+            ? "AI feature list ready. No links matched the current scope."
+            : `AI feature list ready. Analyzed ${processedCount} link${processedCount === 1 ? "" : "s"}.`,
+        discoveredItems: totalCount,
+        processedItems: processedCount,
+        active: false,
+        includeResolvedItems,
+        lastFinishedAt: nowTs(),
+        lastError: null,
+      });
+    } catch (error) {
+      await setAiFeatureBuildState({
+        status: "error",
+        phase: "failed",
+        message:
+          "AI feature list build failed. Review the latest error and retry.",
+        active: false,
+        includeResolvedItems,
+        lastFinishedAt: nowTs(),
+        lastError:
+          error instanceof Error
+            ? error.message
+            : "Unknown AI list build error",
+      });
+    } finally {
+      aiFeatureBuildPromise = null;
+    }
+  })();
 
   return getInboxPayload(resolvedServices);
 }

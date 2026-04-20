@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, isNull, lt } from "drizzle-orm";
 import { getDb } from "@/lib/db";
 import {
+  aiFeatureBuildState,
   appConfig,
   articleSnapshots,
   emails,
@@ -96,6 +97,20 @@ export type SyncStateRecord = {
   updatedAt: number;
 };
 
+export type AiFeatureBuildStateRecord = {
+  status: string;
+  phase: string;
+  message: string;
+  discoveredItems: number;
+  processedItems: number;
+  active: boolean;
+  includeResolvedItems: boolean;
+  lastStartedAt: number | null;
+  lastFinishedAt: number | null;
+  lastError: string | null;
+  updatedAt: number;
+};
+
 export type AppConfigRecord = typeof appConfig.$inferSelect;
 export type SnapshotRecord = typeof articleSnapshots.$inferSelect;
 export type ItemInteractionRecord = typeof itemInteractions.$inferSelect;
@@ -163,6 +178,53 @@ export async function getSyncState(): Promise<SyncStateRecord> {
 
   if (!state) {
     throw new Error("Sync state row was not initialized.");
+  }
+
+  return state;
+}
+
+export async function setAiFeatureBuildState(
+  input: Partial<AiFeatureBuildStateRecord> &
+    Pick<AiFeatureBuildStateRecord, "status" | "phase" | "message">,
+) {
+  const db = getDb();
+  const current = await getAiFeatureBuildState();
+  const nextUpdatedAt = nowTs();
+
+  await db
+    .update(aiFeatureBuildState)
+    .set({
+      status: input.status,
+      phase: input.phase,
+      message: input.message,
+      discoveredItems: input.discoveredItems ?? current.discoveredItems,
+      processedItems: input.processedItems ?? current.processedItems,
+      active: input.active ?? current.active,
+      includeResolvedItems:
+        input.includeResolvedItems ?? current.includeResolvedItems,
+      lastStartedAt:
+        input.lastStartedAt === undefined
+          ? current.lastStartedAt
+          : input.lastStartedAt,
+      lastFinishedAt:
+        input.lastFinishedAt === undefined
+          ? current.lastFinishedAt
+          : input.lastFinishedAt,
+      lastError:
+        input.lastError === undefined ? current.lastError : input.lastError,
+      updatedAt: nextUpdatedAt,
+    })
+    .where(eq(aiFeatureBuildState.id, 1));
+}
+
+export async function getAiFeatureBuildState(): Promise<AiFeatureBuildStateRecord> {
+  const db = getDb();
+  const state = await db.query.aiFeatureBuildState.findFirst({
+    where: eq(aiFeatureBuildState.id, 1),
+  });
+
+  if (!state) {
+    throw new Error("AI feature build state row was not initialized.");
   }
 
   return state;

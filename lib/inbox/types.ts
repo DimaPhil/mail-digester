@@ -1,4 +1,5 @@
 import type {
+  AiFeatureBuildStateRecord,
   InboxEmail,
   SnapshotRecord,
   SyncStateRecord,
@@ -8,6 +9,7 @@ import type { InboxAppConfig } from "@/lib/inbox/service";
 export type InboxPayload = {
   emails: InboxEmail[];
   sync: SyncStateRecord;
+  aiFeatureBuild: AiFeatureBuildStateRecord;
   shouldAutoSync: boolean;
   appConfig: InboxAppConfig;
 };

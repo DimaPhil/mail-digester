@@ -174,3 +174,20 @@ export const syncState = sqliteTable("sync_state", {
   lastError: text("last_error"),
   updatedAt: integer("updated_at", { mode: "number" }).notNull(),
 });
+
+export const aiFeatureBuildState = sqliteTable("ai_feature_build_state", {
+  id: integer("id").primaryKey(),
+  status: text("status").notNull(),
+  phase: text("phase").notNull(),
+  message: text("message").notNull(),
+  discoveredItems: integer("discovered_items").notNull().default(0),
+  processedItems: integer("processed_items").notNull().default(0),
+  active: integer("active", { mode: "boolean" }).notNull().default(false),
+  includeResolvedItems: integer("include_resolved_items", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  lastStartedAt: integer("last_started_at", { mode: "number" }),
+  lastFinishedAt: integer("last_finished_at", { mode: "number" }),
+  lastError: text("last_error"),
+  updatedAt: integer("updated_at", { mode: "number" }).notNull(),
+});

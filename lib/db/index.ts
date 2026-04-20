@@ -171,6 +171,21 @@ function initializeSchema() {
       updated_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS ai_feature_build_state (
+      id INTEGER PRIMARY KEY,
+      status TEXT NOT NULL,
+      phase TEXT NOT NULL,
+      message TEXT NOT NULL,
+      discovered_items INTEGER NOT NULL DEFAULT 0,
+      processed_items INTEGER NOT NULL DEFAULT 0,
+      active INTEGER NOT NULL DEFAULT 0,
+      include_resolved_items INTEGER NOT NULL DEFAULT 0,
+      last_started_at INTEGER,
+      last_finished_at INTEGER,
+      last_error TEXT,
+      updated_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS app_config (
       id INTEGER PRIMARY KEY,
       interest_prompt TEXT,
@@ -256,6 +271,18 @@ function initializeSchema() {
         id, status, phase, message, discovered_emails, processed_emails, active, updated_at
       ) VALUES (
         1, 'idle', 'ready', 'Ready to sync unread TLDR mail.', 0, 0, 0, ?
+      )
+    `,
+    )
+    .run(nowTs());
+
+  instance.sqlite
+    .prepare(
+      `
+      INSERT OR IGNORE INTO ai_feature_build_state (
+        id, status, phase, message, discovered_items, processed_items, active, include_resolved_items, updated_at
+      ) VALUES (
+        1, 'idle', 'ready', 'Ready to build the AI feature list.', 0, 0, 0, 0, ?
       )
     `,
     )

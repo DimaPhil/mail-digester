@@ -26,6 +26,19 @@ async function loadModules() {
   };
 }
 
+async function waitForAiFeatureBuildToFinish(service: ServiceModule) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const payload = await service.getInboxPayload();
+    if (!payload.aiFeatureBuild.active) {
+      return payload;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  throw new Error("Timed out waiting for the AI feature build to finish.");
+}
+
 describe("Inbox service", () => {
   afterEach(() => {
     delete process.env.MAIL_DIGESTER_DB_PATH;
@@ -389,9 +402,10 @@ describe("Inbox service", () => {
       0,
     );
 
-    await service.buildAiFeatureList();
+    const startedPayload = await service.buildAiFeatureList();
+    expect(startedPayload.aiFeatureBuild.active).toBe(true);
 
-    const payload = await service.getInboxPayload();
+    const payload = await waitForAiFeatureBuildToFinish(service);
     const aiEmail = payload.emails.find(
       (email) => email.providerMessageId === "fixture-ai-001",
     )!;
@@ -433,6 +447,7 @@ describe("Inbox service", () => {
 
     await service.resolveItem(resolvedItem.id);
     await service.buildAiFeatureList();
+    await waitForAiFeatureBuildToFinish(service);
 
     const unresolvedOnlyPayload = await service.getInboxPayload();
     const unresolvedOnlyItem = unresolvedOnlyPayload.emails
@@ -446,6 +461,7 @@ describe("Inbox service", () => {
     await service.buildAiFeatureList(undefined, {
       includeResolvedItems: true,
     });
+    await waitForAiFeatureBuildToFinish(service);
 
     const includeResolvedPayload = await service.getInboxPayload();
     const includeResolvedItem = includeResolvedPayload.emails
@@ -454,6 +470,45 @@ describe("Inbox service", () => {
 
     expect(includeResolvedItem.aiFeatureStatus).toBe("included");
     expect(includeResolvedItem.aiFeatureNeedsRefresh).toBe(false);
+  });
+
+  it("persists AI feature build progress so refreshes can observe it", async () => {
+    process.env.MAIL_DIGESTER_INTEREST_CLASSIFICATION_CONCURRENCY = "1";
+    const { service } = await loadModules();
+
+    await service.syncInbox();
+    await service.updateAiFeaturePrompt(
+      "openai claude anthropic roadmap panels",
+    );
+
+    const startedPayload = await service.buildAiFeatureList({
+      aiFeatureClassifier: {
+        classifyLink: async (_input, appConfig) => {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return {
+            aiFeatureStatus: "included",
+            aiFeatureReason: "Matched test AI feature classifier.",
+            aiFeatureModel: "test-ai-feature-classifier",
+            aiFeaturePromptVersion: appConfig.aiFeaturePromptVersion,
+            aiFeatureClassifiedAt: Date.now(),
+          } as const;
+        },
+      },
+    });
+
+    expect(startedPayload.aiFeatureBuild.active).toBe(true);
+    expect(startedPayload.aiFeatureBuild.phase).toBe("listing");
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    const runningPayload = await service.getInboxPayload();
+    expect(runningPayload.aiFeatureBuild.active).toBe(true);
+    expect(runningPayload.aiFeatureBuild.discoveredItems).toBeGreaterThan(0);
+    expect(runningPayload.aiFeatureBuild.processedItems).toBeGreaterThan(0);
+
+    const finishedPayload = await waitForAiFeatureBuildToFinish(service);
+    expect(finishedPayload.aiFeatureBuild.active).toBe(false);
+    expect(finishedPayload.aiFeatureBuild.phase).toBe("ready");
   });
 
   it("bulk resolves older not-interesting links while keeping recent days unresolved", async () => {

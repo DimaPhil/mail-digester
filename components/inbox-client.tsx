@@ -144,6 +144,9 @@ async function readJson<T>(input: RequestInfo, init?: RequestInit) {
 export function InboxClient({ initialData }: { initialData: InboxPayload }) {
   const [emails, setEmails] = useState(initialData.emails);
   const [sync, setSync] = useState(initialData.sync);
+  const [aiFeatureBuild, setAiFeatureBuild] = useState(
+    initialData.aiFeatureBuild,
+  );
   const [appConfig, setAppConfig] = useState(initialData.appConfig);
   const [undoState, setUndoState] = useState<UndoState>(null);
   const [resolvingIds, setResolvingIds] = useState<number[]>([]);
@@ -407,6 +410,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     const payload = await readJson<InboxPayload>("/api/inbox");
     setEmails(applyOptimisticResolutions(payload.emails));
     setSync(payload.sync);
+    setAiFeatureBuild(payload.aiFeatureBuild);
     setAppConfig(payload.appConfig);
     return payload;
   }, [applyOptimisticResolutions]);
@@ -419,31 +423,37 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     setAiFeaturePromptDraft(appConfig.aiFeaturePrompt);
   }, [appConfig.aiFeaturePrompt]);
 
-  function stopPolling() {
+  const stopPolling = useCallback(() => {
     if (pollTimer.current != null) {
       window.clearInterval(pollTimer.current);
       pollTimer.current = null;
     }
-  }
+  }, []);
 
-  function startPolling() {
+  const hasBackgroundActivity = useCallback(
+    (payload: Pick<InboxPayload, "sync" | "aiFeatureBuild">) =>
+      payload.sync.active || payload.aiFeatureBuild.active,
+    [],
+  );
+
+  const startPolling = useCallback(() => {
     if (pollTimer.current != null) {
       return;
     }
 
     pollTimer.current = window.setInterval(async () => {
       const payload = await syncInboxData();
-      if (!payload.sync.active) {
+      if (!hasBackgroundActivity(payload)) {
         stopPolling();
       }
     }, 900);
-  }
+  }, [hasBackgroundActivity, stopPolling, syncInboxData]);
 
   useEffect(() => {
     return () => {
       stopPolling();
     };
-  }, []);
+  }, [stopPolling]);
 
   async function triggerSync(
     reason: "startup" | "manual",
@@ -490,10 +500,10 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
       startTransition(() => {
         setEmails(applyOptimisticResolutions(payload.emails));
         setSync(payload.sync);
+        setAiFeatureBuild(payload.aiFeatureBuild);
         setAppConfig(payload.appConfig);
       });
     } finally {
-      stopPolling();
       await syncInboxData();
     }
   }
@@ -509,14 +519,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
         message: "Starting inbox sync for unread TLDR newsletters…",
       }));
 
-      if (pollTimer.current == null) {
-        pollTimer.current = window.setInterval(async () => {
-          const payload = await syncInboxData();
-          if (!payload.sync.active) {
-            stopPolling();
-          }
-        }, 900);
-      }
+      startPolling();
 
       void (async () => {
         try {
@@ -532,15 +535,30 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
           startTransition(() => {
             setEmails(applyOptimisticResolutions(payload.emails));
             setSync(payload.sync);
+            setAiFeatureBuild(payload.aiFeatureBuild);
             setAppConfig(payload.appConfig);
           });
         } finally {
-          stopPolling();
           await syncInboxData();
         }
       })();
     }
-  }, [applyOptimisticResolutions, initialData.shouldAutoSync, syncInboxData]);
+  }, [
+    applyOptimisticResolutions,
+    startPolling,
+    initialData.shouldAutoSync,
+    syncInboxData,
+  ]);
+
+  useEffect(() => {
+    if (initialData.sync.active || initialData.aiFeatureBuild.active) {
+      startPolling();
+    }
+  }, [
+    initialData.aiFeatureBuild.active,
+    initialData.sync.active,
+    startPolling,
+  ]);
 
   function formatEmailDate(timestamp: number) {
     if (!hydrated) {
@@ -749,6 +767,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
       });
       setEmails(applyOptimisticResolutions(payload.emails));
       setSync(payload.sync);
+      setAiFeatureBuild(payload.aiFeatureBuild);
       setAppConfig(payload.appConfig);
       setFeedbackMessage("Interest prompt saved.");
     } catch (error) {
@@ -776,6 +795,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
       });
       setEmails(applyOptimisticResolutions(payload.emails));
       setSync(payload.sync);
+      setAiFeatureBuild(payload.aiFeatureBuild);
       setAppConfig(payload.appConfig);
       setAiFeatureFeedbackMessage("AI feature prompt saved.");
     } catch (error) {
@@ -832,6 +852,8 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
   async function runAiFeatureListBuild() {
     setAiFeaturePending(true);
     setAiFeatureFeedbackMessage(null);
+    setViewMode("ai_list");
+    startPolling();
 
     try {
       const payload = await readJson<InboxPayload>("/api/ai-feature-list", {
@@ -845,12 +867,14 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
       });
       setEmails(applyOptimisticResolutions(payload.emails));
       setSync(payload.sync);
+      setAiFeatureBuild(payload.aiFeatureBuild);
       setAppConfig(payload.appConfig);
-      setViewMode("ai_list");
       setAiFeatureFeedbackMessage(
-        aiFeatureIncludeResolved
-          ? "AI feature list rebuilt for active and resolved links."
-          : "AI feature list rebuilt for active links.",
+        payload.aiFeatureBuild.active
+          ? "AI feature list build started."
+          : aiFeatureIncludeResolved
+            ? "AI feature list rebuilt for active and resolved links."
+            : "AI feature list rebuilt for active links.",
       );
     } catch (error) {
       setAiFeatureFeedbackMessage(
@@ -1236,6 +1260,51 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
         </div>
 
         <div className="space-y-4 p-4 md:p-5">
+          <div className="rounded-[22px] border border-[var(--border)] bg-white/82 p-4 shadow-[0_18px_50px_rgba(79,53,20,0.08)]">
+            <div className="flex flex-wrap items-center gap-2">
+              <StatusChip
+                label={
+                  aiFeatureBuild.active
+                    ? "Build in progress"
+                    : aiFeatureBuild.status === "error"
+                      ? "Build failed"
+                      : "Build ready"
+                }
+                tone={
+                  aiFeatureBuild.active
+                    ? "accent"
+                    : aiFeatureBuild.status === "error"
+                      ? "warning"
+                      : "neutral"
+                }
+              />
+              <StatusChip label={aiFeatureBuild.phase} tone="neutral" />
+              <StatusChip
+                label={`${aiFeatureBuild.processedItems}/${aiFeatureBuild.discoveredItems || "?"} links`}
+                tone="neutral"
+              />
+            </div>
+            <div className="mt-3 text-sm leading-6 text-[var(--muted)]">
+              {aiFeatureBuild.message}
+            </div>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--accent-soft)]">
+              <div
+                className={cn(
+                  "h-full rounded-full bg-[var(--accent)] transition-[width] duration-500",
+                  aiFeatureBuild.active &&
+                    aiFeatureBuild.discoveredItems === 0 &&
+                    "animate-pulse",
+                )}
+                style={{
+                  width: `${progressPercent(
+                    aiFeatureBuild.processedItems,
+                    aiFeatureBuild.discoveredItems,
+                  )}%`,
+                }}
+              />
+            </div>
+          </div>
+
           {aiFeatureItems.length === 0 ? (
             <div className="rounded-[24px] border border-dashed border-[var(--border)] bg-white/65 p-8 text-center">
               <MailCheck className="mx-auto h-10 w-10 text-[var(--accent)]" />
@@ -1842,7 +1911,11 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                     </p>
                     <textarea
                       className="mt-3 min-h-32 w-full rounded-[18px] border border-[var(--border)] bg-[var(--panel-strong)] px-4 py-3 text-sm leading-6 text-[var(--text)] outline-none transition focus:border-[var(--accent)]"
-                      disabled={configPending || aiFeaturePending}
+                      disabled={
+                        configPending ||
+                        aiFeaturePending ||
+                        aiFeatureBuild.active
+                      }
                       onChange={(event) =>
                         setAiFeaturePromptDraft(event.target.value)
                       }
@@ -1852,7 +1925,11 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                     <div className="mt-3 flex flex-wrap items-center gap-3">
                       <button
                         className="inline-flex items-center gap-2 rounded-full border border-[var(--border)] bg-white px-4 py-2 text-sm font-medium shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
-                        disabled={configPending || aiFeaturePending}
+                        disabled={
+                          configPending ||
+                          aiFeaturePending ||
+                          aiFeatureBuild.active
+                        }
                         onClick={() => void saveAiFeaturePrompt()}
                         type="button"
                       >
@@ -1869,11 +1946,62 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                       ) : null}
                     </div>
                     <div className="mt-4 flex flex-col gap-3 rounded-[18px] border border-[var(--border)] bg-[var(--panel-strong)] p-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <StatusChip
+                          label={
+                            aiFeatureBuild.active
+                              ? "AI list build running"
+                              : aiFeatureBuild.status === "error"
+                                ? "AI list build failed"
+                                : "AI list build idle"
+                          }
+                          tone={
+                            aiFeatureBuild.active
+                              ? "accent"
+                              : aiFeatureBuild.status === "error"
+                                ? "warning"
+                                : "neutral"
+                          }
+                        />
+                        <StatusChip
+                          label={`${aiFeatureBuild.processedItems}/${aiFeatureBuild.discoveredItems || "?"} links`}
+                          tone="neutral"
+                        />
+                        {aiFeatureBuild.includeResolvedItems ? (
+                          <StatusChip
+                            label="Including resolved"
+                            tone="neutral"
+                          />
+                        ) : null}
+                      </div>
+                      <div className="text-sm leading-6 text-[var(--muted)]">
+                        {aiFeatureBuild.message}
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-[var(--accent-soft)]">
+                        <div
+                          className={cn(
+                            "h-full rounded-full bg-[var(--accent)] transition-[width] duration-500",
+                            aiFeatureBuild.active &&
+                              aiFeatureBuild.discoveredItems === 0 &&
+                              "animate-pulse",
+                          )}
+                          style={{
+                            width: `${progressPercent(
+                              aiFeatureBuild.processedItems,
+                              aiFeatureBuild.discoveredItems,
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                      <div className="text-xs text-[var(--muted)]">
+                        Safe to refresh. The AI list build keeps running on the
+                        server.
+                      </div>
                       <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-[var(--muted)]">
                         <Checkbox.Root
                           checked={aiFeatureIncludeResolved}
                           className="inline-flex h-5 w-5 items-center justify-center rounded border border-[var(--border)] bg-white transition hover:border-[var(--accent)]"
-                          disabled={aiFeaturePending}
+                          disabled={aiFeaturePending || aiFeatureBuild.active}
                           onCheckedChange={(checked) =>
                             setAiFeatureIncludeResolved(checked === true)
                           }
@@ -1888,6 +2016,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                         className="inline-flex items-center justify-center gap-2 rounded-full border border-[var(--border)] bg-white px-4 py-2 text-sm font-medium shadow-sm transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
                         disabled={
                           aiFeaturePending ||
+                          aiFeatureBuild.active ||
                           !appConfig.openAiApiKeyConfigured ||
                           !appConfig.aiFeaturePrompt.trim()
                         }
@@ -1897,7 +2026,9 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                         {aiFeaturePending ? (
                           <LoaderCircle className="h-4 w-4 animate-spin" />
                         ) : null}
-                        Build AI feature list
+                        {aiFeatureBuild.active
+                          ? "Building AI feature list…"
+                          : "Build AI feature list"}
                       </button>
                     </div>
                   </div>
