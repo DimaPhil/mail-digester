@@ -1,0 +1,399 @@
+{
+  "version": 1,
+  "name": "Reading feed",
+  "defaultCategory": "ai",
+  "automaticEnable": false,
+  "purpose": "Assistant-side publication policy/catalog only; never connects the service to a mailbox. App ingestion requires an explicit allowed source ID.",
+  "policies": {
+    "navigation": "Small stable topics; publication stays a source badge/filter, never a sender-created category",
+    "tldr": "Both editions always AI/TLDR, preserving all substantive topics and edition provenance",
+    "allowlist": "Exact normalized sender plus stable list identity when available AND positive publication-shape/content gate. Trusted received authentication evidence is required. Unknown identities/template changes go to private review.",
+    "disallowedMailTypes": [
+      "personal_correspondence",
+      "reply_threads",
+      "internal_work",
+      "authentication",
+      "account_security",
+      "billing",
+      "legal",
+      "travel_logistics",
+      "bank_activity",
+      "private_operational_alert",
+      "task_notification",
+      "retail_promotion",
+      "course_sales",
+      "event_only_promotion"
+    ],
+    "labels": "Unread/inbox/Gmail category do not determine inclusion or ranking. Quarantine spam/trash/sent/draft from automatic ingestion.",
+    "sponsors": "Hide sponsorship by default; preserve adjacent editorial. Exclude referral/unsubscribe/giveaway/trade-now/subscribe/discount/navigation CTAs.",
+    "narrative": "One attributed issue/story card, optional public URL; split only independently titled stories; keep citations with parent; never invent URLs.",
+    "dedup": "Group known-tracking-normalized public URLs while retaining all appearances; opaque private mailbox/message identity. Assistant may recognize cross-mailbox issue duplicates by publication/date/content hash. Never dedup by title alone or lose legacy IDs/feedback.",
+    "privacy": "No private mailbox config/IDs/Gmail links/recipients/raw MIME/account data in public repo. Never export credentials/unsubscribe tokens/subscriber tracking/security footer. Set URL absent unless a clean public target is safely derived/verified.",
+    "unknownSource": "Private review queue, never auto-enable or auto-create category tabs",
+    "mixedSource": "Route each public article into existing topics; retain source badge; uncertain content goes to review",
+    "feedback": "Prefer explicit human preferences, weak click/expand evidence; exclude automated/bulk-classifier actions and unknown actors. Dismissal ambiguous; rank before hiding, preserve undo/provenance."
+  },
+  "sources": [
+    {
+      "id": "tldr",
+      "name": "TLDR",
+      "defaultRoute": {
+        "categoryId": "ai",
+        "tabId": "tldr"
+      },
+      "senders": ["dan@tldrnewsletter.com"],
+      "positiveMessageGate": "Exact edition list header and genuine digest layout",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):",
+      "identityHeaders": {
+        "X-EmailOctopus-List-Id": "cfa2d55a-b7be-11e8-a3c9-06b79b628af2"
+      }
+    },
+    {
+      "id": "tldr-ai",
+      "name": "TLDR AI",
+      "defaultRoute": {
+        "categoryId": "ai",
+        "tabId": "tldr"
+      },
+      "senders": ["dan@tldrnewsletter.com"],
+      "positiveMessageGate": "Exact edition list header and genuine digest layout",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):",
+      "identityHeaders": {
+        "X-EmailOctopus-List-Id": "eedf6b14-3de3-11ed-9a32-0241b9615763"
+      }
+    },
+    {
+      "id": "tia-reports",
+      "name": "The Investor Accelerator",
+      "defaultRoute": {
+        "categoryId": "markets",
+        "tabId": "macro"
+      },
+      "senders": ["support@tiainvestor.com"],
+      "positiveMessageGate": "Numbered Weekly Accelerator or Stock & BTC report; no promotion-only campaigns",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "ccu-market-reports",
+      "name": "Crypto Crew University",
+      "defaultRoute": {
+        "categoryId": "markets",
+        "tabId": "crypto"
+      },
+      "senders": ["no--reply@cryptocrewuniversity.com"],
+      "positiveMessageGate": "Recurring market analysis and reading-time marker; no sales or membership CTA",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "blofin-whales-insight",
+      "name": "BloFin Whale’s Insight",
+      "defaultRoute": {
+        "categoryId": "markets",
+        "tabId": "crypto"
+      },
+      "senders": ["official@market.blofin.com"],
+      "positiveMessageGate": "Whale’s Insight body with substantive report; strip account/security footer and personal tracking",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "itc-macro-reports",
+      "name": "Into the Cryptoverse",
+      "defaultRoute": {
+        "categoryId": "markets",
+        "tabId": "macro"
+      },
+      "senders": ["admin@intothecryptoverse.com"],
+      "positiveMessageGate": "The Balance of Risks monthly report and research body; no conferences",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "mastra",
+      "name": "Mastra",
+      "defaultRoute": {
+        "categoryId": "ai",
+        "tabId": "agents-tools"
+      },
+      "senders": ["shane@mastra.ai", "abhi@mastra.ai", "sam@mastra.ai"],
+      "positiveMessageGate": "Numbered Mastra Newsletter; exclude workshop reminders",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "data-deep-dives",
+      "name": "Data Deep Dives",
+      "defaultRoute": {
+        "categoryId": "ai",
+        "tabId": "research"
+      },
+      "senders": ["datadeepdives@substack.com"],
+      "positiveMessageGate": "Exact List-ID and substantive article",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "qdrant",
+      "name": "Qdrant",
+      "defaultRoute": {
+        "categoryId": "engineering",
+        "tabId": "cloud-data"
+      },
+      "senders": ["team@qdrant.com"],
+      "positiveMessageGate": "Monthly newsletter or substantive public research; no event-first messages",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "mongodb",
+      "name": "MongoDB Developer Digest",
+      "defaultRoute": {
+        "categoryId": "engineering",
+        "tabId": "cloud-data"
+      },
+      "senders": ["mongodb@team.mongodb.com"],
+      "positiveMessageGate": "Developer Digest subject and body; exclude private capacity/operational alerts",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "pinecone",
+      "name": "Pinecone Newsletter",
+      "defaultRoute": {
+        "categoryId": "engineering",
+        "tabId": "cloud-data"
+      },
+      "senders": ["community@trypinecone.com", "community@pinecone.io"],
+      "positiveMessageGate": "Global Newsletter subject or Pinecone Newsletter body plus issue/date",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "neon",
+      "name": "Neon Changelog",
+      "defaultRoute": {
+        "categoryId": "engineering",
+        "tabId": "cloud-data"
+      },
+      "senders": ["changelog@neon.tech"],
+      "positiveMessageGate": "Numbered Neon Changelog; no account-targeted operations",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "roadmap",
+      "name": "roadmap.sh",
+      "defaultRoute": {
+        "categoryId": "engineering",
+        "tabId": "systems-code"
+      },
+      "senders": ["newsletter@email.roadmap.sh"],
+      "positiveMessageGate": "Substantive roadmap.sh issue; remove partner ads",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "grafana",
+      "name": "Grafana technical roundup",
+      "defaultRoute": {
+        "categoryId": "engineering",
+        "tabId": "cloud-data"
+      },
+      "senders": ["update@grafana.com"],
+      "positiveMessageGate": "Monthly multi-section technical roundup; no event/discount reminders",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "redis",
+      "name": "Redis research",
+      "defaultRoute": {
+        "categoryId": "ai",
+        "tabId": "agents-tools"
+      },
+      "senders": ["no-reply@hello.redis.io"],
+      "positiveMessageGate": "Research/report-first content; selected issues only",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "google-cloud-digest",
+      "name": "Google Cloud Digest",
+      "defaultRoute": {
+        "categoryId": "ai",
+        "tabId": "research"
+      },
+      "senders": ["contactcloud@google.com"],
+      "positiveMessageGate": "Leader’s Digest issue/editorial layout; no product/event campaigns",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "openai-dev",
+      "name": "OpenAI Dev Newsletter",
+      "defaultRoute": {
+        "categoryId": "ai",
+        "tabId": "agents-tools"
+      },
+      "senders": ["noreply@email.openai.com"],
+      "positiveMessageGate": "OpenAI Dev Newsletter body and multiple resources; no security/admin/billing notices",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "deepnote",
+      "name": "Deepnote technical changelog",
+      "defaultRoute": {
+        "categoryId": "ai",
+        "tabId": "agents-tools"
+      },
+      "senders": ["laura@deepnote.com"],
+      "positiveMessageGate": "Substantial multi-section changelog/API/MCP issue",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "the-batch",
+      "name": "The Batch",
+      "defaultRoute": {
+        "categoryId": "ai",
+        "tabId": "research"
+      },
+      "senders": ["thebatch@deeplearning.ai"],
+      "positiveMessageGate": "The Batch editorial letter plus News sections",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "learn-prompting",
+      "name": "Learn Prompting",
+      "defaultRoute": {
+        "categoryId": "ai",
+        "tabId": "agents-tools"
+      },
+      "senders": ["team@newsletter.learnprompting.org"],
+      "positiveMessageGate": "Multi-story AI news or practical instruction",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "staying-ahead",
+      "name": "Staying Ahead with AI",
+      "defaultRoute": {
+        "categoryId": "ai",
+        "tabId": "agents-tools"
+      },
+      "senders": [
+        "noreply@learn.stayingahead.ai",
+        "noreply@news.stayingahead.ai"
+      ],
+      "positiveMessageGate": "Genuine news, original analysis or step-by-step guide",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "alphaxiv",
+      "name": "alphaXiv",
+      "defaultRoute": {
+        "categoryId": "ai",
+        "tabId": "research"
+      },
+      "senders": ["contact@alphaxiv.org"],
+      "positiveMessageGate": "ALPHAXIV WEEKLY DIGEST with trending/recommended papers",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "agent-uptime",
+      "name": "Agent Uptime",
+      "defaultRoute": {
+        "categoryId": "ai",
+        "tabId": "agents-tools"
+      },
+      "senders": ["agentuptime@substack.com"],
+      "positiveMessageGate": "Substantive reliability/incident essay and List-ID when present",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "bytebytego",
+      "name": "ByteByteGo",
+      "defaultRoute": {
+        "categoryId": "engineering",
+        "tabId": "systems-code"
+      },
+      "senders": ["hi@digest.bytebytego.com"],
+      "positiveMessageGate": "System design refresher plus substantive engineering sections; preserve editorial around ads",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "transloadit-dev-times",
+      "name": "The Dev Times",
+      "defaultRoute": {
+        "categoryId": "engineering",
+        "tabId": "systems-code"
+      },
+      "senders": ["hello@transloadit.com"],
+      "positiveMessageGate": "Numbered The Dev Times subject",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "digitalocean",
+      "name": "DigitalOcean",
+      "defaultRoute": {
+        "categoryId": "engineering",
+        "tabId": "cloud-data"
+      },
+      "senders": ["team@info.digitalocean.com"],
+      "positiveMessageGate": "DigitalOcean Newsletter subject with multi-story monthly digest",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "supabase",
+      "name": "Supabase",
+      "defaultRoute": {
+        "categoryId": "engineering",
+        "tabId": "cloud-data"
+      },
+      "senders": ["welcome@supabase.com"],
+      "positiveMessageGate": "Supa Update subject and Supabase Update/changelog body",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "google-monthly-build",
+      "name": "Google Monthly Build",
+      "defaultRoute": {
+        "categoryId": "engineering",
+        "tabId": "systems-code"
+      },
+      "senders": ["googledev-noreply@google.com"],
+      "positiveMessageGate": "Monthly Build developer program subject and Builder Spotlight/Fast Five body",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "medium",
+      "name": "Medium",
+      "defaultRoute": null,
+      "senders": ["noreply@medium.com"],
+      "positiveMessageGate": "Stories for and Today’s highlights; route each public article by topic; exclude stale sample/reprinted issues",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "crunchbase",
+      "name": "Crunchbase News",
+      "defaultRoute": {
+        "categoryId": "business",
+        "tabId": null
+      },
+      "senders": [
+        "newsletter@crunchbase.com",
+        "newsletter@email.crunchbase.com"
+      ],
+      "positiveMessageGate": "Multi-story Crunchbase Daily/News editorial digest",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "coinbase-research",
+      "name": "Coinbase Research",
+      "defaultRoute": {
+        "categoryId": "markets",
+        "tabId": "crypto"
+      },
+      "senders": ["no-reply@mail.coinbase.com"],
+      "positiveMessageGate": "Weekly or Crypto Market Positioning research; no portfolio/transaction/bonus/account content",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    },
+    {
+      "id": "mira",
+      "name": "Mira News",
+      "defaultRoute": {
+        "categoryId": "markets",
+        "tabId": "crypto"
+      },
+      "senders": ["miranews@mail.beehiiv.com"],
+      "positiveMessageGate": "Substantive ecosystem/journalism analysis; no event-only announcements",
+      "rejectSubjectPattern": "^(?:Re|Fwd|Fw):"
+    }
+  ]
+}

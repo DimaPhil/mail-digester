@@ -1,8 +1,6 @@
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import sanitizeHtml from "sanitize-html";
-import { USER_AGENT } from "@/lib/config";
-import { resolveFixtureUrl } from "@/lib/content/fixtures";
 import { canonicalizeUrl } from "@/lib/content/url";
 
 export type ReadableArticle = {
@@ -75,37 +73,4 @@ export function extractReadableArticleFromHtml(input: {
     contentHtml,
     contentText: result.textContent || "",
   } satisfies ReadableArticle;
-}
-
-export async function fetchReadableSnapshot(url: string) {
-  const fixture = resolveFixtureUrl(url);
-  if (fixture?.html) {
-    return extractReadableArticleFromHtml({
-      html: fixture.html,
-      sourceUrl: url,
-      finalUrl: fixture.finalUrl,
-    });
-  }
-
-  const response = await fetch(url, {
-    redirect: "follow",
-    headers: {
-      "User-Agent": USER_AGENT,
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    },
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch article (${response.status}).`);
-  }
-
-  const finalUrl = response.url;
-  const html = await response.text();
-
-  return extractReadableArticleFromHtml({
-    html,
-    sourceUrl: url,
-    finalUrl,
-  });
 }

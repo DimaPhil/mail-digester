@@ -1,21 +1,2 @@
-import type {
-  AiFeatureBuildStateRecord,
-  InboxEmail,
-  SnapshotRecord,
-  SyncStateRecord,
-} from "@/lib/db/repository";
-import type { InboxAppConfig } from "@/lib/inbox/service";
-
-export type InboxPayload = {
-  emails: InboxEmail[];
-  sync: SyncStateRecord;
-  aiFeatureBuild: AiFeatureBuildStateRecord;
-  shouldAutoSync: boolean;
-  appConfig: InboxAppConfig;
-};
-
-export type ArticlePanelPayload = {
-  itemId: number;
-  snapshot: SnapshotRecord | null;
-  item: InboxEmail["items"][number];
-};
+import type { getInboxPayload } from "@/lib/inbox/service";
+export type InboxPayload = Awaited<ReturnType<typeof getInboxPayload>>;

@@ -1,0 +1,30 @@
+# Local validation — 2026-10-03
+
+These validation results were recorded during local preparation on branch `refactor/api-fed-reader` in an isolated workspace clone. The original Mac main checkout was clean at inspection and remains untouched. Before publication was authorized, no push or PR occurred. No remote server access, production data access, real credential creation, deployment, service restart or automation occurred.
+
+- `npm run check`: format, ESLint, and TypeScript passed.
+- `npm run test:coverage`: 26 tests passed in 5 files. Coverage: 92.89% statements, 84.41% branches, 97.26% functions, 93.54% lines; all enforced 80% thresholds passed.
+- `npm run build`: production build passed with Node 24.13.0 and patched Next.js 16.3.8.
+- `npm run test:e2e`: 3 tests passed on an isolated localhost server/temp SQLite and headless browser. Desktop and 390px mobile views, combined TLDR editions, configured categories, publication filter, sponsored visibility, narrative cards, literal hostile text, details, explicit preferences, outbound click, Done/history/Restore, search, auth roles, common proxy-bypass headers, cross-origin rejection, invalid IDs and private URLs checked.
+- Synthetic database tests: exact ingest replay preserves item/email IDs, timestamps, resolved state, preferences and event count; conflicting item/message/source payload rolls back the whole batch; appending retains old state; different source identities remain distinct; imports emit no engagement.
+- Synthetic migration: pre-classifier schema adds columns/indexes transactionally; all original table/column values match fingerprints; legacy events default unknown; rerun is additive/idempotent. Explicit legacy mapping keeps original items/descriptions/states unchanged.
+- WAL backup: SQLite backup restores, integrity and original-value comparisons pass, files use mode 0600, existing backup path is refused.
+- Documented backup/copy/migrate/verify CLI commands additionally passed against a disposable database with a synthetic custom history table, proving unmodeled tables also remain intact.
+- `npm audit --omit=dev`: zero runtime vulnerabilities after compatible updates. The full toolchain audit still reports 18 affected development package entries (9 high, 8 moderate, 1 low; no critical); forced major downgrades were not attempted. Review development tooling separately before adopting those tools in sensitive CI.
+- `git diff --check`: passed. `.env`, data, databases/WAL, backups, private exports, logs, screenshots and test reports are excluded from Git and Docker build context as appropriate.
+
+Screenshots are synthetic and saved locally in ignored `qa/desktop.png` and `qa/mobile.png`. They contain no real email content, recipient data, credentials or personal history.
+
+The sandbox initially prevented dependency downloads and Next/Playwright localhost workers. Approved dependency/build/test tool executions resolved those environment constraints. A same-origin internal-hostname mismatch and a migration-CLI ESM import issue were found during verification and fixed. Earlier failed diagnostic runs are not the final result.
+
+Actual disabled-deployment database preservation is **not verified**. Locate its complete SQLite/WAL state, make a consistent full backup, restore/migrate a copy, compare every original value, and inspect staging before cutover. Remaining setup: Node 24, private persistent storage, HTTPS proxy/public origin, owner-supplied reader/password and separate ingestion/feedback tokens, approved source scope, private stable ID/cursor storage and cutover watermark/legacy mapping. No daily automation has been configured.
+
+## Local patch repair
+
+The initial patch omitted staged deletions. The corrected local patch is generated against the original HEAD with `git diff HEAD --binary --no-renames`, covering staged deletions, unstaged edits, and intended new files. No real credentials, database/WAL, backup, dependency directory, screenshots, private mail evidence, or build output is included. Synthetic test-only credentials and the blank environment template are intentional test/configuration source. `docs/CHANGED_FILES.txt` enumerates the complete change set, including deletions.
+
+Validation uses a clean disposable clone detached at `e2e245f0b9ec7e1feacd5906d8ffc648d828f472`, applies the patch with `git apply --check` then `git apply --index`, and compares every resulting tracked file's bytes and executable bit against the implementation checkout. The patch applied cleanly and exactly reconstructed all 90 intended tracked files (bytes and executable bits), with 75 changed paths including every deletion. In the reconstructed checkout, `npm run check` (format/lint/types) and `npm run test:coverage` passed: 26 tests in 5 files, with 92.89% statement / 84.41% branch / 97.26% function / 93.54% line coverage. The final documentation-only validation update was included in the regenerated patch and reapplied/recompared before delivery. Build/browser results above came from the byte-identical implementation, rather than a second browser run in the reconstructed copy. The disposable copy uses the already-installed local dependency directory solely for verification; dependencies are not part of the patch. The original checkout remains untouched.
+
+## Draft PR publication review
+
+Publication was explicitly authorized after local validation and patch reconstruction. Remote main still matched the inspected base at publication review. The complete 75-path diff includes the removed mailbox/classifier files and all intended new source, test, configuration and documentation files. Local machine paths were removed from added public documentation. Added credential-shaped literals are limited to explicit synthetic test fixtures, invalid-input examples, and blank environment placeholders. No real mailbox records, private reading evidence, database, backup, dependency directory or credential file is staged. Draft PR checks are tracked on GitHub for the published commit. Production database preservation remains unverified and deployment remains deferred.

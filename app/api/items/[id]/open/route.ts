@@ -1,16 +1,24 @@
 export const dynamic = "force-dynamic";
-
-import { NextResponse } from "next/server";
 import { openItem } from "@/lib/inbox/service";
 
-type Params = {
-  params: Promise<{
-    id: string;
-  }>;
-};
-
-export async function POST(_: Request, { params }: Params) {
-  const { id } = await params;
-  const result = await openItem(Number(id));
-  return NextResponse.json(result);
+export async function POST(
+  request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const raw = (await context.params).id,
+    id = Number(raw);
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(id) || id < 1)
+    return Response.json({ error: "Invalid item ID" }, { status: 400 });
+  try {
+    void request;
+    const result = await openItem(id);
+    return Response.json(result, {
+      headers: { "Cache-Control": "private, no-store" },
+    });
+  } catch {
+    return Response.json(
+      { error: "Item not found or invalid request" },
+      { status: 404 },
+    );
+  }
 }

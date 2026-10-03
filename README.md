@@ -1,110 +1,34 @@
 # Mail Digester
 
-Mail Digester is a single-user web app for clearing unread TLDR newsletters quickly.
-It ingests unread TLDR-family emails from Gmail via `gws`, turns each newsletter into
-individual reading items, extracts readable article views inline, and marks the
-original Gmail message as read once every item in that email has been resolved.
+A private, single-reader library fed by structured email/link data. The assistant selects sources, extracts descriptions, and categorizes items; this service persists and renders those items and records explicit reader engagement. It contains no Gmail access, mailbox polling, OpenAI calls, or scheduled ingestion.
 
-## Stack
+The reader has configurable category tabs and subtabs. AI → TLDR combines TLDR and TLDR AI while keeping each publication and appearance identifiable. Narrative newsletters can be shown without a link. Descriptions are plain text. There is no special AI feature list, automatic article fetch, remote image loading, or tracking pixel.
 
-- Next.js App Router + React + TypeScript
-- SQLite + Drizzle ORM
-- Tailwind CSS + Radix UI primitives
-- `gws` as the Gmail adapter
-- Vitest for unit coverage
-- Playwright for end-to-end flows
-- ESLint + Prettier + Husky + lint-staged
+## Local setup
 
-## Features
+Use Node 24 LTS and `npm ci`. Copy `.env.example` to `.env.local` and supply your own reader username/password and **distinct** ingestion/feedback tokens (each secret must have at least 16 characters). No credentials are included. Run `npm run dev`; the default address is `http://localhost:4001`. Missing authorization configuration fails closed. Use a synthetic, separate database for development. Do not point local development at the existing deployment database.
 
-- Startup sync and manual refresh for unread TLDR-family mail
-- Per-link interest classification using a configurable prompt
-- Bulk resolve for older links classified as not interesting
-- Provider boundary for future non-Gmail adapters
-- Source parser boundary for future non-TLDR digests
-- Per-item resolution with undo
-- Automatic Gmail `UNREAD` removal once an issue is fully processed
-- Visible loading/progress states for sync, article extraction, and resolve actions
-- Fixture-backed test mode that runs without Gmail or external article fetches
+The browser uses HTTP Basic authentication. Use HTTPS for any remote access. Ingestion and feedback use independent Bearer tokens and do not accept reader credentials. Configure the reverse proxy to preserve Authorization and Host headers, disable caching of private responses, and set request limits/rate limits. Compose binds only to localhost and mounts the same `./data:/app/data` location as the previous deployment. It no longer mounts mailbox credentials.
 
-## Local Development
+## API and operations
 
-Prerequisites:
+- [API contract and examples](docs/API.md), with [input JSON Schema](docs/ingest.schema.json). Runtime URL/control-character/duplicate-ID checks supplement JSON Schema.
+- [Backup, migration, deployment, cutover, and rollback](docs/OPERATIONS.md). Preserve the existing database; do not use Drizzle push to replace its schema.
+- [Architecture and preservation findings](docs/ARCHITECTURE.md).
+- [Navigation configuration](config/navigation.json). Source identities are independent of categories and email senders.
+- [Local analytics](analytics/README.md). The read-only engagement API is the preferred assistant feedback interface.
 
-- Node 20+
-- `gws` installed and authenticated for Gmail access
-
-Install and run:
-
-```bash
-npm install
-npm run dev
-```
-
-By default the app runs on [http://localhost:4001](http://localhost:4001).
-Override the port with `PORT`, for example:
-
-```bash
-PORT=4010 npm run dev
-```
-
-## Environment
-
-Optional environment variables:
-
-- `MAIL_DIGESTER_DB_PATH`: override the SQLite file location
-- `PORT`: override the application port, default `4001`
-- `GWS_BINARY`: override the `gws` executable path
-- `GMAIL_TLDR_QUERY`: override the Gmail unread query
-- `OPENAI_API_KEY`: required when using the interest-classification prompt
-- `OPENAI_MODEL`: OpenAI model id for link classification, default `gpt-5.4`
-- `MAIL_DIGESTER_INTEREST_CLASSIFICATION_CONCURRENCY`: max number of parallel OpenAI link classifications during sync, default `4`
-- `MAIL_DIGESTER_GWS_CONFIG_DIR`: host path mounted into Docker for `gws` auth data, default `/home/lilfeel/.config/gws`
-- `MAIL_DIGESTER_USE_FIXTURE_DATA=1`: use local fixture mail instead of Gmail
-- `MAIL_DIGESTER_TEST_ARTICLE_BASE_URL`: base URL embedded into fixture newsletter links
-
-## Docker And Dockge Deployment
-
-The repo includes:
-
-- [Dockerfile](/Users/dmitryfilippov/Documents/work/personal/mail-digester/Dockerfile)
-- [compose.yaml](/Users/dmitryfilippov/Documents/work/personal/mail-digester/compose.yaml)
-- health endpoint at [app/api/health/route.ts](/Users/dmitryfilippov/Documents/work/personal/mail-digester/app/api/health/route.ts)
-
-Production defaults:
-
-- app listens on container port `4001`
-- compose publishes `4001:4001`
-- SQLite persists in `./data`
-- `gws` is installed in the container image
-- host `gws` auth/config is mounted from `${MAIL_DIGESTER_GWS_CONFIG_DIR:-/home/lilfeel/.config/gws}`
-
-For Dockge on the Ubuntu host, place the repo in the Dockge stacks directory and start the stack from `compose.yaml`.
+`MAIL_DIGESTER_ALLOWED_SOURCES` defaults to `tldr,tldr-ai`. Expand it only for explicitly selected reading publications. A sender or domain is not enough to distinguish newsletters from account notices or operational alerts. The assistant owns mailbox/message allowlisting and stable, mailbox-scoped message identity.
 
 ## Verification
-
-Core verification commands:
 
 ```bash
 npm run check
 npm run test:coverage
 npm run build
 npm run test:e2e
-npm run verify:full
 ```
 
-Coverage is enforced at 80%+ in Vitest.
+The E2E server uses a fresh temporary SQLite database and a separate headless browser. All fixtures are synthetic. It must have localhost binding access. Desktop/mobile screenshots are written to ignored `qa/`. No test reads Gmail or production data. Existing legacy parser/HTML-extraction utilities remain offline for compatibility tests; the ingestion API never calls them and accepts structured article titles without the old parser's read-time restrictions.
 
-## Hooks And CI
-
-- `pre-commit`: `lint-staged` + TypeScript typecheck
-- `pre-push`: full verify pass + Playwright e2e
-- GitHub Actions CI runs on Ubuntu 24.04 and executes verify, build, and e2e
-
-## Fixture Mode
-
-Fixture mode is used for deterministic tests and CI:
-
-- newsletter ingestion uses a local mail provider instead of Gmail
-- article extraction resolves fixture article URLs in-process
-- Playwright runs against the real app UI with fixture data enabled
+The implementation is prepared locally. The disabled server has not been contacted, started, or deployed, and preservation of its actual database has **not** been verified.

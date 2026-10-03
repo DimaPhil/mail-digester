@@ -78,6 +78,10 @@ export function loadInteractions({ dbPath, sinceDays }) {
       };
     }
 
+    const hasActor = db
+      .prepare("PRAGMA table_info(item_interactions)")
+      .all()
+      .some((c) => c.name === "actor");
     const snapshotsTable = db
       .prepare(
         "SELECT name FROM sqlite_master WHERE type = ? AND name = ? LIMIT 1",
@@ -138,6 +142,7 @@ export function loadInteractions({ dbPath, sinceDays }) {
               interactions.item_id AS itemId,
               interactions.email_id AS emailId,
               interactions.action AS action,
+              ${hasActor ? "interactions.actor" : "'unknown'"} AS actor,
               interactions.resolve_mode AS resolveMode,
               interactions.opened_before_resolve AS openedBeforeResolve,
               interactions.provider AS provider,
@@ -187,4 +192,20 @@ export function writeOutput({ content, outputPath }) {
     recursive: true,
   });
   fs.writeFileSync(outputPath, content);
+}
+
+export function isHumanPreferenceEvidence(row) {
+  if (row.actor !== "human") return false;
+  try {
+    if (JSON.parse(row.metadataJson ?? "{}").bulkResolveMode) return false;
+  } catch {
+    return false;
+  }
+  return [
+    "description_expand",
+    "link_open",
+    "resolve",
+    "unresolve",
+    "preference",
+  ].includes(row.action);
 }

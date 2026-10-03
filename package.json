@@ -19,12 +19,15 @@
     "test:e2e": "playwright test",
     "verify": "npm run check && npm run test:coverage",
     "verify:full": "npm run verify && npm run build && npm run test:e2e",
-    "analytics:interests": "analytics/run-on-server.sh interests",
-    "analytics:interests:json": "analytics/run-on-server.sh interests --format json",
-    "analytics:llm-context": "analytics/run-on-server.sh llm-context",
-    "analytics:llm-context:json": "analytics/run-on-server.sh llm-context --format json",
-    "analytics:export": "analytics/run-on-server.sh export",
-    "db:studio": "drizzle-kit studio"
+    "analytics:interests": "node analytics/analyze-interests.mjs",
+    "analytics:interests:json": "node analytics/analyze-interests.mjs --format json",
+    "analytics:llm-context": "node analytics/llm-context.mjs",
+    "analytics:llm-context:json": "node analytics/llm-context.mjs --format json",
+    "analytics:export": "node analytics/export-interactions.mjs",
+    "db:studio": "drizzle-kit studio",
+    "db:backup": "node scripts/db-maintenance.mjs backup",
+    "db:verify-preserved": "node scripts/db-maintenance.mjs verify",
+    "db:migrate-copy": "node --import tsx scripts/migrate-db.ts"
   },
   "repository": {
     "type": "git",
@@ -47,7 +50,6 @@
     "jsdom": "^27.0.1",
     "lucide-react": "^1.8.0",
     "next": "^16.2.3",
-    "openai": "^6.34.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "sanitize-html": "^2.17.2",
@@ -80,7 +82,7 @@
     "vitest": "^4.0.4"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=24 <25"
   },
   "lint-staged": {
     "*.{ts,tsx,js,mjs,cjs,json,md,css}": [

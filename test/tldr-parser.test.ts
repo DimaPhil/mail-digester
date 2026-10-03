@@ -4,7 +4,7 @@ import {
   providerMessageFromFixture,
   TldrDigestSource,
 } from "@/lib/digest/tldr";
-import { FixtureMailProvider } from "@/lib/mail/providers/fixture";
+import { FixtureMailProvider } from "./fixtures/mail";
 
 describe("TldrDigestSource", () => {
   it("parses TLDR AI issues into ordered reading items", async () => {

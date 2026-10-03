@@ -1,27 +1,8 @@
-export const dynamic = "force-dynamic";
-
-import { NextResponse } from "next/server";
-import { getInboxPayload, syncInbox } from "@/lib/inbox/service";
-
-export async function POST(request: Request) {
-  try {
-    const body = (await request.json().catch(() => null)) as {
-      forceFullResync?: boolean;
-      includeResolvedItemsInRecheck?: boolean;
-    } | null;
-    await syncInbox(undefined, {
-      forceFullResync: body?.forceFullResync === true,
-      includeResolvedItemsInRecheck:
-        body?.includeResolvedItemsInRecheck === true,
-    });
-    return NextResponse.json(await getInboxPayload());
-  } catch (error) {
-    return NextResponse.json(
-      {
-        error: error instanceof Error ? error.message : "Sync failed",
-        ...(await getInboxPayload()),
-      },
-      { status: 500 },
-    );
-  }
+export function POST() {
+  return Response.json(
+    { error: "Retired: use structured ingestion at /api/v1/ingest" },
+    { status: 410 },
+  );
 }
+export const GET = POST;
+export const PATCH = POST;

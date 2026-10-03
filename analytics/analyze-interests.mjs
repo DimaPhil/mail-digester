@@ -1,5 +1,6 @@
 import {
   defaultDbPath,
+  isHumanPreferenceEvidence,
   loadInteractions,
   parseFlags,
   readNumberFlag,
@@ -92,6 +93,10 @@ function itemKey(row) {
 }
 
 function interactionScore(row) {
+  if (row.action === "preference") {
+    const signal = JSON.parse(row.metadataJson ?? "{}").signal;
+    return signal === "interested" ? 4 : signal === "less_like_this" ? -4 : 0;
+  }
   if (row.action === "description_expand") {
     return MODEL.descriptionExpandWeight;
   }
@@ -429,7 +434,7 @@ function main() {
   });
   const analysis = buildAnalysis({
     dbPath,
-    interactions: loaded.interactions,
+    interactions: loaded.interactions.filter(isHumanPreferenceEvidence),
     minSamples,
     top,
     warning: loaded.warning,

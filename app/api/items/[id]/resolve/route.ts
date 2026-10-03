@@ -1,32 +1,25 @@
 export const dynamic = "force-dynamic";
-
-import { NextResponse } from "next/server";
 import { resolveItem } from "@/lib/inbox/service";
-import type { ItemInteractionMetadata } from "@/lib/db/repository";
 
-type Params = {
-  params: Promise<{
-    id: string;
-  }>;
-};
-
-async function readMetadata(request: Request) {
+export async function POST(
+  request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const raw = (await context.params).id,
+    id = Number(raw);
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(id) || id < 1)
+    return Response.json({ error: "Invalid item ID" }, { status: 400 });
   try {
-    const body = (await request.json()) as {
-      metadata?: ItemInteractionMetadata;
-    };
-    return body.metadata ?? {};
+    void request;
+    const result = await resolveItem(id);
+    return Response.json(
+      { emails: result },
+      { headers: { "Cache-Control": "private, no-store" } },
+    );
   } catch {
-    return {};
+    return Response.json(
+      { error: "Item not found or invalid request" },
+      { status: 404 },
+    );
   }
-}
-
-export async function POST(request: Request, { params }: Params) {
-  const { id } = await params;
-  const emails = await resolveItem(Number(id), undefined, {
-    ...(await readMetadata(request)),
-    userAgent: request.headers.get("user-agent"),
-    referrer: request.headers.get("referer"),
-  });
-  return NextResponse.json({ emails });
 }

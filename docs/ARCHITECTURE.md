@@ -1,0 +1,17 @@
+# Architecture and preservation findings
+
+Inspected the clean existing Mac checkout, branch main, origin `DimaPhil/mail-digester`. No repository or ancestor AGENTS.md or repository .agents instructions were found. Changes were made in an isolated workspace clone on `refactor/api-fed-reader`; the original checkout was not modified.
+
+The original app used Next.js 16/React 19/TypeScript, SQLite with better-sqlite3 and Drizzle, Docker standalone output, Gmail via gws, and OpenAI classification. It automatically synced on load, marked Gmail messages read on completion, and had a special AI feature list. No reader auth was found in the source. Compose persisted `./data:/app/data` and used `/app/data/mail-digester.sqlite`. Deployment is disabled; no remote connection or production inspection was performed.
+
+All original tables remain: emails, items, article_snapshots, item_interactions, app_config, sync_state, ai_feature_build_state. Removed runtime features retain their historic columns/records. Migration only uses CREATE IF NOT EXISTS and ADD COLUMN. Classification indexes now run after additive ALTERs so pre-classification databases can initialize. Schema initialization is transactional. It does not rewrite provider IDs, item IDs, dates, resolved states, snapshots, old classifications, or interaction values.
+
+New tables: ingestion_sources, ingestion_messages, ingestion_items, item_navigation, reader_preferences. The interaction actor column defaults to unknown. API mappings attach stable source/message/appearance identities without depending on parser title hashes. Explicit legacy mapping preserves old rows. The API uses an immediate SQLite transaction for atomic conflict detection/append, and reader transitions/preferences plus their interaction snapshots are atomic. Redundant state transitions are no-ops.
+
+The reader/ingestion/feedback interfaces are independently authorized. Reader pages use Basic auth with same-origin mutation checks; API endpoints use separate Bearer tokens. Compose exposes only a localhost port for a private HTTPS reverse proxy. No mailbox authentication volume or Google CLI is needed. No OpenAI dependency/call is needed. The app does not categorize content; it displays assistant-supplied collection placements.
+
+The assistant owns source approval, message selection, extraction and categorization, stable opaque mailbox-scoped IDs, and scheduling. Category taxonomy is config/data-driven and independent of publication identity. Private summaries and provenance remain in the user's database and authorized API responses, never in the public source repo. Incoming text is escaped by React, URLs are validated, and the server never fetches article destinations.
+
+Offline legacy digest parser and HTML sanitizer remain for compatibility; they are not used by structured ingestion. Old Gmail and classifier adapters were removed, and old integration endpoints return 410. Offline analytics raw exports preserve all historic evidence; scored analysis/context filters unknown/automated events. The read-only feedback API is the preferred learning interface.
+
+The existing SQLite database has not been provided or inspected. Synthetic migration/backup tests prove the implemented path against representative schemas, not preservation of the actual disabled deployment. Follow the operations checklist and compare all old table values on a restore copy before cutover.

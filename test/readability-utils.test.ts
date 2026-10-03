@@ -1,7 +1,4 @@
-import {
-  extractReadableArticleFromHtml,
-  fetchReadableSnapshot,
-} from "@/lib/content/readability";
+import { extractReadableArticleFromHtml } from "@/lib/content/readability";
 import { assertNever, cleanText, cn, formatRelativeDate } from "@/lib/utils";
 
 describe("Readable article extraction", () => {
@@ -41,16 +38,6 @@ describe("Readable article extraction", () => {
         html: "<html><body></body></html>",
       }),
     ).toThrow(/Could not extract readable article content/i);
-  });
-
-  it("rejects non-ok fetch responses", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ({ ok: false, status: 503 })),
-    );
-    await expect(
-      fetchReadableSnapshot("https://source.example/story"),
-    ).rejects.toThrow(/503/);
   });
 });
 
