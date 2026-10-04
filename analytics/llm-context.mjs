@@ -1,6 +1,8 @@
 import {
   defaultDbPath,
-  isHumanPreferenceEvidence,
+  explicitPreference,
+  interactionScore,
+  preferenceEvidence,
   loadInteractions,
   parseFlags,
   readNumberFlag,
@@ -12,7 +14,7 @@ const FILTER_RECOMMENDATION_SCHEMA_PATH =
   "analytics/filter-recommendations.schema.json";
 
 function itemKey(row) {
-  return `${row.sourceVariant}::${row.title}::${row.canonicalUrl ?? row.finalUrl ?? row.trackedUrl}`;
+  return row.itemId;
 }
 
 function truncateText(input, limit) {
@@ -33,6 +35,7 @@ function summarizeItems(interactions) {
   for (const row of interactions) {
     const key = itemKey(row);
     const current = map.get(key) ?? {
+      itemId: row.itemId,
       sourceFamily: row.sourceFamily,
       sourceVariant: row.sourceVariant,
       section: row.section,
@@ -54,6 +57,8 @@ function summarizeItems(interactions) {
       resolvesAfterOpen: 0,
       directResolves: 0,
       unresolves: 0,
+      preference: null,
+      interestScore: 0,
       firstSeenAt: row.createdAt,
       lastSeenAt: row.createdAt,
     };
@@ -61,6 +66,9 @@ function summarizeItems(interactions) {
     current.emailSubjects.add(row.emailSubject);
     current.firstSeenAt = Math.min(current.firstSeenAt, row.createdAt);
     current.lastSeenAt = Math.max(current.lastSeenAt, row.createdAt);
+    current.interestScore += interactionScore(row);
+    if (row.action === "preference")
+      current.preference = explicitPreference(row);
 
     if (row.action === "description_expand") {
       current.descriptionExpands += 1;
@@ -81,12 +89,6 @@ function summarizeItems(interactions) {
     .map((item) => ({
       ...item,
       emailSubjects: [...item.emailSubjects],
-      interestScore:
-        item.descriptionExpands * 0.75 +
-        item.linkOpens * 1.5 +
-        item.resolvesAfterOpen * 4 -
-        item.directResolves * 2 +
-        item.unresolves,
       articleSnapshot: item.snapshotStatus
         ? {
             status: item.snapshotStatus,
@@ -242,7 +244,7 @@ function main() {
   });
   const payload = buildPayload({
     dbPath,
-    interactions: loaded.interactions.filter(isHumanPreferenceEvidence),
+    interactions: preferenceEvidence(loaded.interactions),
     maxItems,
     warning: loaded.warning,
   });

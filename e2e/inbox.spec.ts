@@ -77,7 +77,7 @@ const fixtures = [
         id: "paper",
         title: "A field guide to learning systems",
         description:
-          "Plain text <script>window.compromised=true</script> stays plain text. A reader can explore the complete context without any hidden images or scripts.",
+          "How learning systems improve over time: a practical look at evaluation, iteration, and the research behind reliable feedback.\n\nPlain text <script>window.compromised=true</script> stays plain text.",
         section: "Papers",
         collections: collection("ai", "AI", "research", "News & Research"),
       },
@@ -97,12 +97,15 @@ const fixtures = [
         description:
           "Good foundations make complicated systems easier to reason about.",
         url: "https://example.com/systems",
-        collections: collection(
-          "engineering",
-          "Engineering",
-          "systems-code",
-          "Systems & Code",
-        ),
+        collections: [
+          ...collection(
+            "engineering",
+            "Engineering",
+            "systems-code",
+            "Systems & Code",
+          ),
+          ...collection("ai", "AI", "agents-tools", "Agents & Tools"),
+        ],
       },
     ],
   },
@@ -118,7 +121,7 @@ const fixtures = [
         id: "narrative",
         title: "Signals from the macro landscape",
         description:
-          "A complete narrative briefing with no fabricated article link.",
+          "Interest rates, inflation, and market sentiment in one concise briefing. A wider view of the forces shaping the week.",
         collections: collection("markets", "Markets", "crypto", "Crypto"),
       },
     ],
@@ -139,9 +142,15 @@ test("desktop reader and mobile layouts show configured categories and combined 
   await page.goto("/");
   await expect(
     page.getByRole("heading", {
-      name: "A little perspective. Ahead of the noise.",
+      name: "All reading",
     }),
   ).toBeVisible();
+  await expect(page.locator("article")).toHaveCount(6);
+  await page.screenshot({ path: "qa/desktop-all.png", fullPage: true });
+  await page
+    .getByRole("navigation", { name: "Categories" })
+    .getByRole("button", { name: /^AI/ })
+    .click();
   await page
     .getByRole("button", { name: "TLDR", exact: false })
     .first()
@@ -170,11 +179,36 @@ test("desktop reader and mobile layouts show configured categories and combined 
       name: "A practical guide to distributed systems",
     }),
   ).toBeVisible();
+  await page
+    .getByRole("navigation", { name: "Categories" })
+    .getByRole("button", { name: /^AI/ })
+    .click();
+  await page.getByRole("button", { name: /Agents & Tools/ }).click();
+  await expect(page.locator("article")).toHaveCount(1);
+  await expect(
+    page.getByRole("heading", {
+      name: "A practical guide to distributed systems",
+    }),
+  ).toBeVisible();
   await page.getByRole("button", { name: /Markets/ }).click();
   await expect(
     page.getByRole("heading", { name: "Signals from the macro landscape" }),
   ).toBeVisible();
   await expect(page.getByRole("link", { name: "Read story" })).toHaveCount(0);
+  await page.getByLabel("Search reading").fill("no match");
+  await expect(
+    page.getByRole("heading", { name: "No matching stories" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await expect(page.locator("article")).toHaveCount(1);
+  await page.getByRole("button", { name: /Business/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "You're all caught up" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Read history" }).click();
+  await expect(
+    page.getByRole("heading", { name: "No reading history yet" }),
+  ).toBeVisible();
 });
 test("details, human preferences, clicks, resolve history and undo persist", async ({
   page,
@@ -211,6 +245,13 @@ test("details, human preferences, clicks, resolve history and undo persist", asy
   await expect(card).toHaveCount(0);
   await page.getByRole("button", { name: "Read history" }).click();
   await expect(card).toBeVisible();
+  await page
+    .getByRole("navigation", { name: "Categories" })
+    .getByRole("button", { name: /^AI/ })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "TLDR 1", exact: true }),
+  ).toBeVisible();
   await card.getByRole("button", { name: "Restore" }).click();
   await expect(card).toHaveCount(0);
   await page.getByRole("button", { name: "To read", exact: true }).click();
@@ -283,8 +324,58 @@ test("reader privacy, API roles, retired integrations and adversarial input", as
     ).status(),
   ).toBe(400);
   await page.goto("/");
+  await page
+    .getByRole("navigation", { name: "Categories" })
+    .getByRole("button", { name: /^AI/ })
+    .click();
   await page.getByRole("button", { name: /Research/ }).click();
   expect(await page.evaluate(() => "compromised" in window)).toBe(false);
   await expect(page.locator("article script, article img")).toHaveCount(0);
   await anonymous.dispose();
+});
+
+test("failed actions can retry and reader mutations stay serialized", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const card = page
+    .locator("article")
+    .filter({ hasText: "A practical guide to distributed systems" });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let requests = 0;
+  await page.route("**/api/items/*/preference", async (route) => {
+    requests++;
+    if (requests === 1) {
+      await gate;
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: '{"error":"Synthetic temporary failure"}',
+      });
+    } else {
+      await route.continue();
+    }
+  });
+  await card.getByRole("button", { name: /More like/ }).click();
+  await expect(
+    page.getByRole("button", { name: "Done", exact: true }).first(),
+  ).toBeDisabled();
+  await expect(card.getByRole("button", { name: /Less like/ })).toBeDisabled();
+  release();
+  const alert = page.locator(".error-message[role=alert]");
+  await expect(alert).toContainText("Could not save this action");
+  await expect(card.getByRole("button", { name: /More like/ })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+  await card.getByRole("button", { name: /More like/ }).click();
+  await expect(card.getByRole("button", { name: /More like/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(alert).toHaveCount(0);
+  expect(requests).toBe(2);
 });

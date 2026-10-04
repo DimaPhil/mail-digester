@@ -20,7 +20,8 @@ a {
   text-decoration: none;
 }
 button,
-input {
+input,
+select {
   font: inherit;
 }
 button {
@@ -32,7 +33,8 @@ button:disabled {
 }
 button:focus-visible,
 a:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible {
   outline: 3px solid #83b2a7;
   outline-offset: 3px;
 }
@@ -108,19 +110,8 @@ input:focus-visible {
   background: #dce9e1;
   border-radius: 4px;
 }
-.sidebar-footer {
-  margin-top: auto;
-  font-size: 11px;
-  line-height: 1.8;
-  color: #81908b;
-}
-.status-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  background: #6c9785;
-  border-radius: 50%;
-  margin-right: 6px;
+.sidebar nav {
+  overflow-y: auto;
 }
 .main-content {
   flex: 1;
@@ -144,13 +135,13 @@ input:focus-visible {
 .reading-content {
   max-width: 1080px;
   margin: auto;
-  padding: 48px 48px 20px;
+  padding: 32px 48px 40px;
 }
 .page-intro {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 38px;
+  margin-bottom: 28px;
   gap: 24px;
 }
 .eyebrow {
@@ -160,15 +151,12 @@ input:focus-visible {
   color: #6b8580;
 }
 h1 {
-  margin: 17px 0;
+  margin: 10px 0;
   font-family: Georgia, serif;
   font-size: 43px;
   line-height: 1.17;
   font-weight: 400;
   letter-spacing: -1.5px;
-}
-h1 span {
-  color: #739087;
 }
 .page-intro p {
   font-size: 13px;
@@ -228,6 +216,7 @@ h1 span {
   justify-content: space-between;
   margin: 27px 0 25px;
   gap: 12px;
+  flex-wrap: wrap;
 }
 .view-switch {
   display: flex;
@@ -294,6 +283,8 @@ h1 span {
   gap: 10px;
   color: #7c8d84;
   font-size: 10px;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
 }
 .source-badge {
   border: 1px solid #dee8e2;
@@ -306,6 +297,12 @@ h1 span {
 .card-date {
   margin-left: auto;
   white-space: nowrap;
+}
+.sponsor-badge {
+  color: #805226;
+  background: #faf2e8;
+  border-radius: 4px;
+  padding: 3px 7px;
 }
 h2 {
   font-size: 19px;
@@ -366,6 +363,9 @@ h2 {
   border: 0;
   padding: 8px 0;
 }
+.text-button[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
 .icon-button {
   display: grid;
   place-items: center;
@@ -417,21 +417,12 @@ h2 {
 .empty-state p {
   font-size: 13px;
 }
-.content-footer {
-  text-align: center;
-  font-size: 10px;
-  color: #91a095;
-  padding: 34px;
-  letter-spacing: 0.4px;
+.empty-state .resolve-button {
+  margin: 20px auto 0;
 }
 .muted {
   color: var(--muted);
   font-size: 11px;
-}
-@media (min-width: 1500px) {
-  .reading-content {
-    padding-top: 65px;
-  }
 }
 @media (max-width: 900px) {
   .sidebar {
@@ -476,7 +467,6 @@ h2 {
     border-radius: 9px;
   }
   .sidebar-label,
-  .sidebar-footer,
   .brand-caption {
     display: none;
   }
@@ -487,6 +477,7 @@ h2 {
     margin-top: 18px;
   }
   .category-button {
+    flex-shrink: 0;
     width: auto;
     white-space: nowrap;
     padding: 8px 12px;
@@ -530,7 +521,6 @@ h2 {
     font-size: 12px;
   }
   .list-toolbar {
-    flex-wrap: wrap;
     margin: 22px 0;
   }
   .search {
@@ -572,9 +562,6 @@ h2 {
   padding: 7px 10px;
   color: var(--muted);
   font-size: 11px;
-}
-.list-toolbar {
-  flex-wrap: wrap;
 }
 @media (max-width: 640px) {
   .publication-filter {

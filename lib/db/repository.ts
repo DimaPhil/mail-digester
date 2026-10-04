@@ -1,8 +1,6 @@
-import { asc, desc, inArray } from "drizzle-orm";
+import { asc, desc } from "drizzle-orm";
 import { getDb, getSqlite } from "@/lib/db";
 import { emails, items } from "@/lib/db/schema";
-import type { ItemInterestStatus } from "@/lib/inbox/interest";
-import type { AiFeatureStatus } from "@/lib/inbox/ai-feature";
 import { nowTs } from "@/lib/utils";
 export type ItemInteractionAction =
   | "reader_open"
@@ -15,12 +13,7 @@ export type ItemInteractionMetadata = Record<
   string,
   boolean | number | string | null | undefined
 >;
-export type InboxEmailItem = typeof items.$inferSelect & {
-  interestStatus: ItemInterestStatus;
-  aiFeatureStatus: AiFeatureStatus;
-  interestNeedsRefresh: boolean;
-  aiFeatureNeedsRefresh: boolean;
-};
+export type InboxEmailItem = typeof items.$inferSelect;
 export type InboxEmail = typeof emails.$inferSelect & {
   items: InboxEmailItem[];
 };
@@ -35,25 +28,13 @@ export async function listInboxEmails() {
   }
 
   const itemRows = await db.query.items.findMany({
-    where: inArray(
-      items.emailId,
-      emailRows.map((email) => email.id),
-    ),
     orderBy: [asc(items.position)],
   });
 
+  const itemsByEmail = Map.groupBy(itemRows, (item) => item.emailId);
   return emailRows.map((email) => ({
     ...email,
-    items: itemRows
-      .filter((item) => item.emailId === email.id)
-      .sort((a, b) => a.position - b.position)
-      .map((item) => ({
-        ...item,
-        interestStatus: item.interestStatus as ItemInterestStatus,
-        aiFeatureStatus: item.aiFeatureStatus as AiFeatureStatus,
-        interestNeedsRefresh: false,
-        aiFeatureNeedsRefresh: false,
-      })),
+    items: itemsByEmail.get(email.id) ?? [],
   }));
 }
 

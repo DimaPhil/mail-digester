@@ -1,11 +1,3 @@
-import { cleanText } from "@/lib/utils";
-
-export type CanonicalUrlResult = {
-  trackedUrl: string;
-  canonicalUrl: string | null;
-  needsNetworkResolution: boolean;
-};
-
 const STRIP_QUERY_PREFIXES = [
   "utm_",
   "mc_",
@@ -39,65 +31,4 @@ export function canonicalizeUrl(input: string) {
     : "";
 
   return url.toString();
-}
-
-function extractEmbeddedTrackingUrl(input: URL) {
-  const marker = "/CL0/";
-  const index = input.pathname.indexOf(marker);
-  if (index === -1) {
-    return null;
-  }
-
-  const encoded = input.pathname.slice(index + marker.length);
-  const beforeMetadata = encoded.split("/1/")[0];
-  return decodeURIComponent(beforeMetadata);
-}
-
-export function normalizeTrackedUrl(rawUrl: string): CanonicalUrlResult {
-  const trackedUrl = cleanText(rawUrl);
-  if (!trackedUrl) {
-    return {
-      trackedUrl,
-      canonicalUrl: null,
-      needsNetworkResolution: false,
-    };
-  }
-
-  let parsed: URL;
-  try {
-    parsed = new URL(trackedUrl);
-  } catch {
-    return {
-      trackedUrl,
-      canonicalUrl: null,
-      needsNetworkResolution: false,
-    };
-  }
-
-  if (parsed.hostname === "tracking.tldrnewsletter.com") {
-    const embedded = extractEmbeddedTrackingUrl(parsed);
-    if (!embedded) {
-      return {
-        trackedUrl,
-        canonicalUrl: canonicalizeUrl(trackedUrl),
-        needsNetworkResolution: false,
-      };
-    }
-
-    return normalizeTrackedUrl(embedded);
-  }
-
-  if (parsed.hostname === "links.tldrnewsletter.com") {
-    return {
-      trackedUrl,
-      canonicalUrl: canonicalizeUrl(trackedUrl),
-      needsNetworkResolution: true,
-    };
-  }
-
-  return {
-    trackedUrl,
-    canonicalUrl: canonicalizeUrl(trackedUrl),
-    needsNetworkResolution: false,
-  };
 }

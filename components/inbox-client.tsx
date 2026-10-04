@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowUpRight,
@@ -18,7 +18,7 @@ import type { InboxPayload } from "@/lib/inbox/types";
 type ReadingItem = InboxPayload["emails"][number]["items"][number];
 export function InboxClient({ initialData }: { initialData: InboxPayload }) {
   const [data, setData] = useState(initialData),
-    [category, setCategory] = useState("ai"),
+    [category, setCategory] = useState("all-categories"),
     [tab, setTab] = useState("all"),
     [query, setQuery] = useState(""),
     [publication, setPublication] = useState("all"),
@@ -26,14 +26,16 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     [showSponsors, setShowSponsors] = useState(false),
     [expanded, setExpanded] = useState<number[]>([]),
     [busy, setBusy] = useState<number | null>(null),
+    [refreshing, setRefreshing] = useState(false),
     [error, setError] = useState("");
+  const pending = useRef(false);
+  const refreshVersion = useRef(0);
   const all = useMemo(
     () =>
       data.emails.flatMap((email) =>
         email.items.map((item) => ({
           ...item,
           email,
-          collections: item.collections,
         })),
       ),
     [data],
@@ -82,17 +84,32 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
       (showSponsors || i.itemKind !== "sponsor") &&
       (publication === "all" || i.email.sourceVariant === publication) &&
       (showRead ? i.resolvedAt != null : i.resolvedAt == null) &&
-      `${i.title} ${i.summary}`.toLowerCase().includes(query.toLowerCase()),
+      `${i.title} ${i.summary} ${i.email.sourceVariant} ${i.email.subject}`
+        .toLowerCase()
+        .includes(query.trim().toLowerCase()),
   );
-  const remaining = all.filter(
+  const remaining = scoped.filter(
     (i) => i.resolvedAt == null && (showSponsors || i.itemKind !== "sponsor"),
   ).length;
   async function refresh() {
-    const r = await fetch("/api/inbox", { cache: "no-store" });
-    if (!r.ok) throw new Error("Could not refresh the library.");
-    setData(await r.json());
+    const version = ++refreshVersion.current;
+    setRefreshing(true);
+    try {
+      const r = await fetch("/api/inbox", { cache: "no-store" });
+      if (!r.ok) throw new Error("Could not refresh the library.");
+      const payload = await r.json();
+      if (version === refreshVersion.current) {
+        setData(payload);
+        setError("");
+      }
+    } finally {
+      if (version === refreshVersion.current) setRefreshing(false);
+    }
   }
   async function action(item: ReadingItem, name: string, body?: unknown) {
+    // ponytail: serialize reader mutations; use per-item queues if parallel actions matter.
+    if (pending.current) return false;
+    pending.current = true;
     setBusy(item.id);
     setError("");
     try {
@@ -110,16 +127,17 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
       setError(e instanceof Error ? e.message : "Could not save action");
       return false;
     } finally {
+      pending.current = false;
       setBusy(null);
     }
   }
   async function expand(item: ReadingItem) {
     if (expanded.includes(item.id)) {
-      setExpanded(expanded.filter((id) => id !== item.id));
+      setExpanded((ids) => ids.filter((id) => id !== item.id));
       return;
     }
     if (await action(item, "description-expand")) {
-      setExpanded([...expanded, item.id]);
+      setExpanded((ids) => [...ids, item.id]);
       await action(item, "open");
     }
   }
@@ -137,37 +155,33 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
         </Link>
         <div className="sidebar-label">LIBRARY</div>
         <nav aria-label="Categories">
-          {(categories.length ? categories : [["ai", "AI"]]).map(
-            ([id, label]) => (
-              <button
-                className={`category-button ${activeCategory === id ? "active" : ""}`}
-                key={id}
-                onClick={() => {
-                  setCategory(id);
-                  setTab("all");
-                  setPublication("all");
-                }}
-              >
-                <Inbox size={18} />
-                <span>{label}</span>
-                <span className="count">
-                  {
-                    all.filter(
-                      (i) =>
-                        i.resolvedAt == null &&
-                        (showSponsors || i.itemKind !== "sponsor") &&
-                        (id === "all-categories" ||
-                          i.collections.some((c) => c.categoryId === id)),
-                    ).length
-                  }
-                </span>
-              </button>
-            ),
-          )}
+          {categories.map(([id, label]) => (
+            <button
+              className={`category-button ${activeCategory === id ? "active" : ""}`}
+              key={id}
+              aria-pressed={activeCategory === id}
+              onClick={() => {
+                setCategory(id);
+                setTab("all");
+                setPublication("all");
+              }}
+            >
+              <Inbox size={18} />
+              <span>{label}</span>
+              <span className="count" title="Unread stories">
+                {
+                  all.filter(
+                    (i) =>
+                      i.resolvedAt == null &&
+                      (showSponsors || i.itemKind !== "sponsor") &&
+                      (id === "all-categories" ||
+                        i.collections.some((c) => c.categoryId === id)),
+                  ).length
+                }
+              </span>
+            </button>
+          ))}
         </nav>
-        <div className="sidebar-footer">
-          <span className="status-dot" />A quieter way to stay informed.
-        </div>
       </aside>
       <main className="main-content">
         <header className="topbar">
@@ -178,6 +192,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
           <button
             className="icon-button"
             aria-label="Refresh library"
+            disabled={refreshing || busy !== null}
             onClick={() => {
               refresh().catch(() => setError("Could not refresh the library."));
             }}
@@ -188,17 +203,13 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
         <div className="reading-content">
           <div className="page-intro">
             <div>
-              <div className="eyebrow">CURATED FOR YOUR CURIOSITY</div>
-              <h1>
-                A little perspective.
-                <br />
-                <span>Ahead of the noise.</span>
-              </h1>
-              <p>Good links. Useful context. Your next worthwhile read.</p>
+              <div className="eyebrow">YOUR READING SPACE</div>
+              <h1>{categories.find(([id]) => id === activeCategory)?.[1]}</h1>
+              <p>Stories and newsletters, organized by topic.</p>
             </div>
             <div className="reading-count">
               <strong>{remaining}</strong>
-              <span>links to explore</span>
+              <span>stories to read</span>
             </div>
           </div>
           <nav className="source-tabs" aria-label="Reading collections">
@@ -216,7 +227,9 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                   {
                     scoped.filter(
                       (i) =>
-                        i.resolvedAt == null &&
+                        (showRead
+                          ? i.resolvedAt != null
+                          : i.resolvedAt == null) &&
                         (showSponsors || i.itemKind !== "sponsor") &&
                         i.collections.some(
                           (c) =>
@@ -284,7 +297,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
             </span>
             <span>NEWEST FIRST</span>
           </div>
-          <div className="reading-list">
+          <div className="reading-list" aria-busy={refreshing}>
             {visible.map((item) => (
               <article className="reading-card" key={item.id}>
                 <div className="card-topline">
@@ -292,6 +305,9 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                     {item.email.sourceVariant}
                   </span>
                   <span>{item.section}</span>
+                  {item.itemKind === "sponsor" && (
+                    <span className="sponsor-badge">Sponsored</span>
+                  )}
                   <span className="card-date">
                     {new Date(item.email.receivedAt).toLocaleDateString(
                       "en-US",
@@ -318,6 +334,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                         rel="noopener noreferrer"
                         onClick={(event) => {
                           event.preventDefault();
+                          if (pending.current) return;
                           const destination = window.open(
                             "about:blank",
                             "_blank",
@@ -338,7 +355,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                         <ArrowUpRight size={16} />
                       </a>
                     ) : (
-                      <span className="muted">Link unavailable</span>
+                      <span className="muted">Newsletter</span>
                     )}
                     {item.readTimeText && (
                       <span className="read-time">{item.readTimeText}</span>
@@ -346,7 +363,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                     <button
                       className="text-button"
                       aria-expanded={expanded.includes(item.id)}
-                      disabled={busy === item.id}
+                      disabled={busy !== null}
                       onClick={() => expand(item)}
                     >
                       Details
@@ -357,8 +374,9 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                     <button
                       className={`icon-button ${item.preference === "interested" ? "selected" : ""}`}
                       aria-label={`More like: ${item.title}`}
+                      title="More like this"
                       aria-pressed={item.preference === "interested"}
-                      disabled={busy === item.id}
+                      disabled={busy !== null}
                       onClick={() =>
                         action(item, "preference", {
                           signal:
@@ -373,8 +391,9 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                     <button
                       className={`icon-button ${item.preference === "less_like_this" ? "selected" : ""}`}
                       aria-label={`Less like: ${item.title}`}
+                      title="Less like this"
                       aria-pressed={item.preference === "less_like_this"}
-                      disabled={busy === item.id}
+                      disabled={busy !== null}
                       onClick={() =>
                         action(item, "preference", {
                           signal:
@@ -388,7 +407,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                     </button>
                     <button
                       className="resolve-button"
-                      disabled={busy === item.id}
+                      disabled={busy !== null}
                       onClick={() =>
                         action(item, item.resolvedAt ? "unresolve" : "resolve")
                       }
@@ -409,22 +428,33 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
             <div className="empty-state">
               <Circle size={28} />
               <h2>
-                {query
+                {query || publication !== "all" || tab !== "all"
                   ? "No matching stories"
                   : showRead
-                    ? "Your reading history starts here"
-                    : "Room for a fresh perspective"}
+                    ? "No reading history yet"
+                    : "You're all caught up"}
               </h2>
               <p>
-                {query
-                  ? "Try a different word or collection."
-                  : "New stories will appear here when added to your library."}
+                {query || publication !== "all" || tab !== "all"
+                  ? "Try another search, publication, or collection."
+                  : showRead
+                    ? "Stories you mark Done will appear here."
+                    : "New stories will appear when added to your library."}
               </p>
+              {(query || publication !== "all" || tab !== "all") && (
+                <button
+                  className="resolve-button"
+                  onClick={() => {
+                    setQuery("");
+                    setPublication("all");
+                    setTab("all");
+                  }}
+                >
+                  Clear filters
+                </button>
+              )}
             </div>
           )}
-          <footer className="content-footer">
-            A considered reading list. At your pace.
-          </footer>
         </div>
       </main>
     </div>

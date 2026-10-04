@@ -1,6 +1,6 @@
 # Safe setup, cutover, and rollback
 
-This is a prepared procedure. The disabled deployment has not been contacted or restarted. No credentials, scheduled task, PR, push, or deployment was created. The actual existing database and its schema are unverified.
+Before deploying over an existing database, back it up, migrate a copy, and verify preservation as described below.
 
 ## Requirements to resolve before setup
 
@@ -48,7 +48,7 @@ Verify unauthorized reader/API requests fail, roles are separated, authorized in
 
 ## Reviewed cutover
 
-After backup/restore proof and staging acceptance, choose the setup time. Keep the original volume and old image/version available. Put the reviewed migrated copy in the new deployment's persistent data location while no process is using it. Keep baseline/old database separately intact. Supply ignored .env values and validated source allowlist. Build/start the new stack **only when the owner is ready**; no start operation was executed in this task.
+After backup/restore proof and staging acceptance, choose the setup time. Keep the original volume and old image/version available. Put the reviewed migrated copy in the new deployment's persistent data location while no process is using it. Keep baseline/old database separately intact. Supply ignored .env values and validated source allowlist, then build/start the new stack.
 
 Compose publishes 127.0.0.1:4001, requiring the owner's HTTPS reverse proxy for remote use. Host reader/password/token configuration must be complete; otherwise routes fail closed. Health exposes only status and tests local DB readiness, without mail identifiers, paths, mailbox checks, or external calls. Verify private access before enabling the assistant's first synthetic API request, then an explicitly scoped real ingestion. Record the cutover watermark/checkpoint privately. Never blindly replay title-hash-derived legacy messages: use explicit origin/legacyItemId mapping or start with newly selected messages after the agreed watermark.
 

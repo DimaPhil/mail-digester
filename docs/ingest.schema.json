@@ -9,7 +9,14 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 200,
-          "pattern": "^[a-zA-Z0-9@._:+/-]+$"
+          "allOf": [
+            {
+              "pattern": "^[a-zA-Z0-9@._:+/-]+$"
+            },
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]*$"
+            }
+          ]
         },
         "label": {
           "type": "string",
@@ -81,14 +88,7 @@
           "maxLength": 2000
         }
       },
-      "required": [
-        "id",
-        "subject",
-        "receivedAt",
-        "senderName",
-        "senderEmail",
-        "description"
-      ],
+      "required": ["id", "subject", "receivedAt"],
       "additionalProperties": false
     },
     "items": {
@@ -172,14 +172,7 @@
             }
           }
         },
-        "required": [
-          "id",
-          "title",
-          "description",
-          "section",
-          "kind",
-          "collections"
-        ],
+        "required": ["id", "title"],
         "additionalProperties": false
       }
     }

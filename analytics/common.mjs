@@ -209,3 +209,53 @@ export function isHumanPreferenceEvidence(row) {
     "preference",
   ].includes(row.action);
 }
+
+export function preferenceEvidence(interactions) {
+  const human = interactions.filter(isHumanPreferenceEvidence);
+  const latest = new Map();
+  for (const row of human) {
+    if (row.action !== "preference") continue;
+    const previous = latest.get(row.itemId);
+    if (!previous || row.id > previous.id) latest.set(row.itemId, row);
+  }
+  return human.filter(
+    (row) => row.action !== "preference" || latest.get(row.itemId) === row,
+  );
+}
+
+export function explicitPreference(row) {
+  return row.action === "preference"
+    ? (JSON.parse(row.metadataJson ?? "{}").signal ?? null)
+    : null;
+}
+
+export function interactionScore(row) {
+  switch (row.action) {
+    case "preference":
+      return explicitPreference(row) === "interested"
+        ? INTERACTION_WEIGHTS.interestedWeight
+        : explicitPreference(row) === "less_like_this"
+          ? INTERACTION_WEIGHTS.lessLikeThisWeight
+          : 0;
+    case "description_expand":
+      return INTERACTION_WEIGHTS.descriptionExpandWeight;
+    case "link_open":
+      return INTERACTION_WEIGHTS.linkOpenWeight;
+    case "resolve":
+      return row.resolveMode === "after_open"
+        ? INTERACTION_WEIGHTS.afterOpenResolveWeight
+        : INTERACTION_WEIGHTS.directResolveWeight;
+    default:
+      return 0;
+  }
+}
+
+export const INTERACTION_WEIGHTS = {
+  descriptionExpandWeight: 0.75,
+  linkOpenWeight: 1.5,
+  afterOpenResolveWeight: 4,
+  directResolveWeight: 0,
+  unresolveWeight: 0,
+  interestedWeight: 4,
+  lessLikeThisWeight: -4,
+};

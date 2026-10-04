@@ -22,33 +22,43 @@ export async function getInboxPayload() {
     tab_id: string;
     tab_label: string;
   }>;
+  const preferencesByItem = new Map(
+    preferences.map((p) => [p.item_id, p.signal]),
+  );
+  const navigationByItem = Map.groupBy(navigation, (n) => n.item_id);
   return {
     navigation: navigationConfig,
     emails: emails.map((email) => ({
-      ...email,
+      id: email.id,
+      subject: email.subject,
+      sourceVariant: email.sourceVariant,
+      receivedAt: email.receivedAt,
       items: email.items.map((item) => ({
-        ...item,
+        id: item.id,
+        title: item.title,
+        summary: item.summary,
+        section: item.section,
+        readTimeText: item.readTimeText,
+        itemKind: item.itemKind,
+        resolvedAt: item.resolvedAt,
         safeUrl: safeExternalUrl(
           item.finalUrl ?? item.canonicalUrl ?? item.trackedUrl,
         ),
-        preference:
-          preferences.find((p) => p.item_id === item.id)?.signal ?? null,
+        preference: preferencesByItem.get(item.id) ?? null,
         collections: (() => {
-          const stored = navigation
-            .filter((n) => n.item_id === item.id)
-            .map((n) => ({
-              categoryId: n.category_id,
-              categoryLabel: n.category_label,
-              tabId: n.tab_id,
-              tabLabel: n.tab_label,
-            }));
+          const stored = (navigationByItem.get(item.id) ?? []).map((n) => ({
+            categoryId: n.category_id,
+            categoryLabel: n.category_label,
+            tabId: n.tab_id,
+            tabLabel: n.tab_label,
+          }));
           const defaults = defaultCollections(
-            /tldr/i.test(email.sourceFamily) && email.sourceFamily !== "tldr-ai"
+            email.provider === "gmail" && /^tldr$/i.test(email.sourceFamily)
               ? "tldr"
               : email.sourceFamily,
           );
           if (
-            /tldr/i.test(email.sourceFamily) &&
+            /^tldr(?:-ai)?$/i.test(email.sourceFamily) &&
             !stored.some((c) => c.categoryId === "ai" && c.tabId === "tldr")
           )
             return [...defaults, ...stored];
@@ -113,7 +123,6 @@ function transition(
 }
 export async function resolveItem(
   itemId: number,
-  _services?: unknown,
   metadata: ItemInteractionMetadata = {},
 ) {
   transition(itemId, true, metadata);

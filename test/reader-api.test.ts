@@ -2,6 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
+import { execFileSync } from "node:child_process";
+import inputSchema from "../docs/ingest.schema.json";
 import { ingestSchema } from "@/lib/api/ingest";
 import { safeExternalUrl } from "@/lib/content/safety";
 import {
@@ -181,6 +183,28 @@ it("records opens/clicks/details and explicit preferences while preserving resol
   await expect(service.setPreference(999, "clear")).rejects.toThrow(
     /not found/,
   );
+});
+it("keeps explicit topics for other sources whose IDs happen to contain TLDR", async () => {
+  const { ingest, service } = await setup();
+  const collections = [
+    {
+      categoryId: "engineering",
+      categoryLabel: "Engineering",
+      tabId: "systems-code",
+      tabLabel: "Systems & Code",
+    },
+  ];
+  ingest(
+    ingestSchema.parse({
+      ...fixture,
+      source: { id: "tldr-community", label: "Community" },
+      items: [{ ...fixture.items[0], collections }],
+    }),
+  );
+  const item = (await service.getInboxPayload()).emails[0].items[0];
+  expect(item.collections).toEqual(collections);
+  expect(item).not.toHaveProperty("aiFeatureStatus");
+  expect(item).not.toHaveProperty("interestModel");
 });
 it("backs up WAL safely and adds schema without changing any old values, even before classifier columns existed", async () => {
   const { database } = await setup();
@@ -390,6 +414,90 @@ it("returns an empty private library without side effects and handles invalid JS
       }),
     ),
   ).rejects.toThrow(/Missing body/);
+});
+it("keeps input defaults optional in the published JSON Schema", () => {
+  expect(inputSchema.properties.message.required).toEqual([
+    "id",
+    "subject",
+    "receivedAt",
+  ]);
+  expect(inputSchema.properties.items.items.required).toEqual(["id", "title"]);
+  expect(inputSchema.properties.source.properties.id.allOf).toContainEqual({
+    pattern: "^[a-z0-9][a-z0-9_-]*$",
+  });
+});
+it("keeps latest explicit preferences and separate appearances in both recommendation tools", async () => {
+  const { ingest, service } = await setup();
+  const result = ingest(
+    ingestSchema.parse({
+      ...fixture,
+      items: [
+        fixture.items[0],
+        { ...fixture.items[0], id: "another-appearance" },
+      ],
+    }),
+  );
+  const [one, two] = result.items.map((item) => item.internalId);
+  await service.resolveItem(one);
+  await service.unresolveItem(one);
+  await service.resolveItem(one);
+  await service.resolveItem(two);
+  const run = (script: string) =>
+    JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          `analytics/${script}.mjs`,
+          "--db",
+          path.join(dir, "synthetic.sqlite"),
+          "--format",
+          "json",
+        ],
+        { encoding: "utf8" },
+      ),
+    );
+  expect(run("analyze-interests").candidateRules).toEqual([]);
+  expect(
+    run("llm-context").items.map(
+      (item: { interestScore: number }) => item.interestScore,
+    ),
+  ).toEqual([0, 0]);
+  for (const signal of [
+    "interested",
+    "clear",
+    "interested",
+    "less_like_this",
+    "clear",
+  ] as const) {
+    await service.setPreference(one, signal);
+  }
+  await service.setPreference(two, "interested");
+  const analysis = run("analyze-interests");
+  expect(analysis.uniqueItemCount).toBe(2);
+  expect(analysis.topInterestingItems).toHaveLength(1);
+  expect(analysis.topInterestingItems[0]).toMatchObject({
+    score: 4,
+    preference: "interested",
+  });
+  expect(analysis.likelySkippedItems).toEqual([]);
+  const context = run("llm-context");
+  expect(context.items).toHaveLength(2);
+  expect(
+    context.items.find((item: { itemId: number }) => item.itemId === one),
+  ).toMatchObject({ interestScore: 0, preference: "clear" });
+  expect(
+    context.items.find((item: { itemId: number }) => item.itemId === two),
+  ).toMatchObject({ interestScore: 4, preference: "interested" });
+  expect(rows("item_interactions")).toHaveLength(10);
+  await service.setPreference(one, "less_like_this");
+  await service.setPreference(two, "less_like_this");
+  const negative = run("analyze-interests");
+  expect(negative.likelySkippedItems).toHaveLength(2);
+  expect(
+    negative.candidateRules.some(
+      (rule: { type: string }) => rule.type === "deprioritize",
+    ),
+  ).toBe(true);
 });
 it("rejects private/reserved literal address variants and preserves safe public destinations", () => {
   for (const url of [

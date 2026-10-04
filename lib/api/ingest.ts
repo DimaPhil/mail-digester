@@ -31,10 +31,7 @@ export const ingestSchema = z
   .object({
     source: z
       .object({
-        id: id.refine(
-          (v) => /^[a-z0-9][a-z0-9_-]*$/.test(v),
-          "Use a lowercase source ID",
-        ),
+        id: id.regex(/^[a-z0-9][a-z0-9_-]*$/, "Use a lowercase source ID"),
         label: text(80).min(1),
       })
       .strict(),

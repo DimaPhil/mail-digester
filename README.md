@@ -14,7 +14,6 @@ The browser uses HTTP Basic authentication. Use HTTPS for any remote access. Ing
 
 - [API contract and examples](docs/API.md), with [input JSON Schema](docs/ingest.schema.json). Runtime URL/control-character/duplicate-ID checks supplement JSON Schema.
 - [Backup, migration, deployment, cutover, and rollback](docs/OPERATIONS.md). Preserve the existing database; do not use Drizzle push to replace its schema.
-- [Architecture and preservation findings](docs/ARCHITECTURE.md).
 - [Navigation configuration](config/navigation.json). Source identities are independent of categories and email senders.
 - [Local analytics](analytics/README.md). The read-only engagement API is the preferred assistant feedback interface.
 
@@ -29,6 +28,6 @@ npm run build
 npm run test:e2e
 ```
 
-The E2E server uses a fresh temporary SQLite database and a separate headless browser. All fixtures are synthetic. It must have localhost binding access. Desktop/mobile screenshots are written to ignored `qa/`. No test reads Gmail or production data. Existing legacy parser/HTML-extraction utilities remain offline for compatibility tests; the ingestion API never calls them and accepts structured article titles without the old parser's read-time restrictions.
+The E2E server uses a fresh temporary SQLite database and a separate headless browser. All fixtures are synthetic. Desktop/mobile screenshots are written to ignored `qa/`. No test reads Gmail or production data. Run `npm run api:schema` after changing the ingestion contract to regenerate its input JSON Schema.
 
-The implementation is prepared locally. The disabled server has not been contacted, started, or deployed, and preservation of its actual database has **not** been verified.
+Legacy database tables, item IDs, reading states, classifications, cached articles, and interaction history are retained. Mailbox retrieval can return later as a producer of the ingestion API. Follow the backup and migration procedure before deploying over an existing database.

@@ -65,3 +65,13 @@ export function writeOutput(input: {
 export function isHumanPreferenceEvidence(
   row: Pick<LoadedInteraction, "actor" | "metadataJson" | "action">,
 ): boolean;
+export function preferenceEvidence(
+  interactions: LoadedInteraction[],
+): LoadedInteraction[];
+export function explicitPreference(
+  row: Pick<LoadedInteraction, "action" | "metadataJson">,
+): string | null;
+export function interactionScore(
+  row: Pick<LoadedInteraction, "action" | "metadataJson" | "resolveMode">,
+): number;
+export const INTERACTION_WEIGHTS: Record<string, number>;
