@@ -74,4 +74,4 @@ export function explicitPreference(
 export function interactionScore(
   row: Pick<LoadedInteraction, "action" | "metadataJson" | "resolveMode">,
 ): number;
-export const INTERACTION_WEIGHTS: Record<string, number>;
+export declare const INTERACTION_WEIGHTS: Record<string, number>;
