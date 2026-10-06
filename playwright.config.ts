@@ -7,10 +7,6 @@ export default defineConfig({
   use: {
     baseURL: `http://127.0.0.1:${port}`,
     headless: true,
-    httpCredentials: {
-      username: "synthetic",
-      password: "synthetic-reader-test-only",
-    },
   },
   webServer: {
     command: "node scripts/start-e2e.mjs",

@@ -13,11 +13,7 @@ export function authorizeBearer(request: Request, role: "INGEST" | "FEEDBACK") {
     process.env[
       `MAIL_DIGESTER_${role === "INGEST" ? "FEEDBACK" : "INGEST"}_TOKEN`
     ];
-  if (
-    token &&
-    (token === otherToken ||
-      token === process.env.MAIL_DIGESTER_READER_PASSWORD)
-  )
+  if (token && token === otherToken)
     return Response.json(
       { error: "API roles require distinct secrets" },
       { status: 503 },

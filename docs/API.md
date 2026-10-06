@@ -1,10 +1,22 @@
 # Reading service API v1
 
-Use HTTPS and disable caching of private responses. [Setup](../README.md#local-setup) describes reader credentials and separate ingestion/feedback tokens. Imported descriptions are untrusted plain text.
+Use the private Tailscale HTTPS address and disable caching of private responses. [Setup](../README.md#local-setup) describes the network access boundary and separate ingestion/feedback tokens. Imported descriptions are untrusted plain text.
+
+## Read library
+
+`GET /api/inbox` requires Tailscale access, with no app credentials. It returns `{ navigation, emails }`; every email includes its items with `id`, `title`, `summary`, `safeUrl`, `resolvedAt`, `preference`, and `collections`. `resolvedAt: null` means To read. This is the same endpoint the browser uses; it returns the full library without server-side filtering or pagination. Apply filters in the client.
+
+```bash
+READING_BASE_URL=https://lilfeel-ai-mf.tail52362f.ts.net:8443
+curl --fail-with-body "$READING_BASE_URL/api/inbox" \
+  | jq '.emails[].items[] | select(.resolvedAt == null) | {id, title, url: .safeUrl, collections}'
+```
+
+For AI → TLDR, filter items with `any(.collections[]; .categoryId == "ai" and .tabId == "tldr")`. A single item may have multiple memberships but occurs only once in the library response.
 
 ## Ingestion
 
-`POST /api/v1/ingest` requires `Authorization: Bearer <ingestion token>` and `Content-Type: application/json`. The source ID must be in `MAIL_DIGESTER_ALLOWED_SOURCES`; reader credentials and feedback tokens cannot ingest.
+`POST /api/v1/ingest` requires `Authorization: Bearer <ingestion token>` and `Content-Type: application/json`. The source ID must be in `MAIL_DIGESTER_ALLOWED_SOURCES`; feedback tokens cannot ingest.
 
 ```json
 {
@@ -94,6 +106,6 @@ Repeated Done/Restore or the current preference are no-ops. Use the latest expli
 
 ## Browser routes
 
-The single-user reader uses `/api/inbox` and POST `/api/items/:id/{open,link-open,description-expand,resolve,unresolve,preference}`. Preference takes `{ "signal": "interested" }`, less_like_this, or clear; other actions accept no client metadata. IDs must be positive integers. Cross-origin browser mutations are rejected. Shared reader credentials share history and preferences.
+The reader uses `/api/inbox` and POST `/api/items/:id/{open,link-open,description-expand,resolve,unresolve,preference}` over the private network without app credentials. Preference takes `{ "signal": "interested" }`, less_like_this, or clear; other actions accept no client metadata. IDs must be positive integers. Cross-origin browser mutations are rejected. All readers share history and preferences.
 
 Retired `/api/sync`, `/api/config`, `/api/ai-feature-list`, and `/api/items/resolve-not-interesting` endpoints return `410` without doing work.

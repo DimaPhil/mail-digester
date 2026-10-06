@@ -270,34 +270,21 @@ test("details, human preferences, clicks, resolve history and undo persist", asy
     page.getByRole("heading", { name: "No matching stories" }),
   ).toBeVisible();
 });
-test("reader privacy, API roles, retired integrations and adversarial input", async ({
-  playwright,
+test("reader access, API roles, retired integrations and adversarial input", async ({
   request,
   page,
 }) => {
-  const anonymous = await playwright.request.newContext({
-    baseURL: `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? "4101"}`,
-    httpCredentials: { username: "", password: "" },
-  });
-  expect((await anonymous.get("/")).status()).toBe(401);
-  expect((await anonymous.get("/api/inbox")).status()).toBe(401);
+  const reader = await request.get("/");
+  expect(reader.status()).toBe(200);
+  expect(reader.headers()["www-authenticate"]).toBeUndefined();
+  expect(reader.headers()["cache-control"]).toContain("no-store");
+  const inbox = await request.get("/api/inbox");
+  expect(inbox.status()).toBe(200);
+  expect(inbox.headers()["cache-control"]).toContain("no-store");
+  expect((await request.get("/api/v1/engagement")).status()).toBe(401);
   expect(
     (
-      await anonymous.get("/", {
-        headers: { rsc: "1", "next-router-prefetch": "1" },
-      })
-    ).status(),
-  ).toBe(401);
-  expect(
-    (
-      await anonymous.get("/api/inbox", {
-        headers: { "x-middleware-subrequest": "proxy:proxy:proxy:proxy:proxy" },
-      })
-    ).status(),
-  ).toBe(401);
-  expect(
-    (
-      await anonymous.get("/api/v1/engagement", { headers: ingestHeaders })
+      await request.get("/api/v1/engagement", { headers: ingestHeaders })
     ).status(),
   ).toBe(401);
   expect(
@@ -331,7 +318,6 @@ test("reader privacy, API roles, retired integrations and adversarial input", as
   await page.getByRole("button", { name: /Research/ }).click();
   expect(await page.evaluate(() => "compromised" in window)).toBe(false);
   await expect(page.locator("article script, article img")).toHaveCount(0);
-  await anonymous.dispose();
 });
 
 test("failed actions can retry and reader mutations stay serialized", async ({

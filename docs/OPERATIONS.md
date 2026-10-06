@@ -4,9 +4,9 @@ Use the [README setup](../README.md#local-setup) for credentials and runtime req
 
 ## Deployment
 
-- Use Node 24, persistent SQLite storage writable by container UID 1000, and HTTPS for remote access.
+- Use Node 24, persistent SQLite storage writable by container UID 1000, and Tailscale Serve HTTPS for remote access. The reader has no app login; restrict reachability to trusted tailnet users/devices.
 - Compose binds `127.0.0.1:4001` and mounts `./data:/app/data`. Locate the existing database before starting over an old deployment; an empty directory is not proof that no prior data exists.
-- Set `MAIL_DIGESTER_PUBLIC_ORIGIN` to the external HTTPS origin. Forward Authorization and Host through the proxy, disable private-response caching, and configure authentication rate limits and a body limit that allows the API's 512,000 bytes.
+- Set `MAIL_DIGESTER_PUBLIC_ORIGIN` to the Tailscale HTTPS origin. Forward Authorization and Host through the proxy, disable private-response caching, and use a body limit that allows the API's 512,000 bytes.
 - Store databases, backups, payloads, and ingestion checkpoints privately, outside the source checkout. The service does not retrieve mail or schedule ingestion.
 
 ## Preserve an existing database

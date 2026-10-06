@@ -6,9 +6,9 @@ The reader has configurable category tabs and subtabs. AI → TLDR combines TLDR
 
 ## Local setup
 
-Use Node 24 LTS and `npm ci`. Copy `.env.example` to `.env.local` and supply your own reader username/password and **distinct** ingestion/feedback tokens (each secret must have at least 16 characters). No credentials are included. Run `npm run dev`; the default address is `http://localhost:4001`. Missing authorization configuration fails closed. Use a synthetic, separate database for development. Do not point local development at the existing deployment database.
+Use Node 24 LTS and `npm ci`. Copy `.env.example` to `.env.local` and supply **distinct** ingestion/feedback tokens (each secret must have at least 16 characters). No tokens are included. Run `npm run dev`; the default address is `http://localhost:4001`. Missing API authorization configuration fails closed. Use a synthetic, separate database for development. Do not point local development at the existing deployment database.
 
-The browser uses HTTP Basic authentication. Use HTTPS for any remote access. Ingestion and feedback use independent Bearer tokens and do not accept reader credentials. Configure the reverse proxy to preserve Authorization and Host headers, disable caching of private responses, and set request limits/rate limits. Compose binds only to localhost and mounts the same `./data:/app/data` location as the previous deployment. It no longer mounts mailbox credentials.
+The browser and library API have no app login: access is restricted by the private Tailscale network. Everyone permitted to reach the service shares the library, reading history, and preferences. Keep Compose bound to localhost and expose it through Tailscale Serve over HTTPS; do not publish the reader to the internet or LAN. Ingestion and feedback retain independent Bearer tokens. Preserve Authorization and Host headers through the proxy and disable caching of private responses. Compose mounts `./data:/app/data` without mailbox credentials.
 
 ## API and operations
 
