@@ -10,3 +10,14 @@ tsconfig.tsbuildinfo
 e2e
 test
 README.md
+
+.env
+.env.*
+!.env.example
+backups
+private
+*.sqlite*
+*.db
+*.db-*
+*.jsonl
+qa

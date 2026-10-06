@@ -3,6 +3,7 @@ export type LoadedInteraction = {
   itemId: number;
   emailId: number;
   action: string;
+  actor: string;
   resolveMode: string | null;
   openedBeforeResolve: number | null;
   provider: string;
@@ -60,3 +61,17 @@ export function writeOutput(input: {
   content: string;
   outputPath: string | null;
 }): void;
+
+export function isHumanPreferenceEvidence(
+  row: Pick<LoadedInteraction, "actor" | "metadataJson" | "action">,
+): boolean;
+export function preferenceEvidence(
+  interactions: LoadedInteraction[],
+): LoadedInteraction[];
+export function explicitPreference(
+  row: Pick<LoadedInteraction, "action" | "metadataJson">,
+): string | null;
+export function interactionScore(
+  row: Pick<LoadedInteraction, "action" | "metadataJson" | "resolveMode">,
+): number;
+export declare const INTERACTION_WEIGHTS: Record<string, number>;

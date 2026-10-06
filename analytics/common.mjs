@@ -78,6 +78,10 @@ export function loadInteractions({ dbPath, sinceDays }) {
       };
     }
 
+    const hasActor = db
+      .prepare("PRAGMA table_info(item_interactions)")
+      .all()
+      .some((c) => c.name === "actor");
     const snapshotsTable = db
       .prepare(
         "SELECT name FROM sqlite_master WHERE type = ? AND name = ? LIMIT 1",
@@ -138,6 +142,7 @@ export function loadInteractions({ dbPath, sinceDays }) {
               interactions.item_id AS itemId,
               interactions.email_id AS emailId,
               interactions.action AS action,
+              ${hasActor ? "interactions.actor" : "'unknown'"} AS actor,
               interactions.resolve_mode AS resolveMode,
               interactions.opened_before_resolve AS openedBeforeResolve,
               interactions.provider AS provider,
@@ -188,3 +193,69 @@ export function writeOutput({ content, outputPath }) {
   });
   fs.writeFileSync(outputPath, content);
 }
+
+export function isHumanPreferenceEvidence(row) {
+  if (row.actor !== "human") return false;
+  try {
+    if (JSON.parse(row.metadataJson ?? "{}").bulkResolveMode) return false;
+  } catch {
+    return false;
+  }
+  return [
+    "description_expand",
+    "link_open",
+    "resolve",
+    "unresolve",
+    "preference",
+  ].includes(row.action);
+}
+
+export function preferenceEvidence(interactions) {
+  const human = interactions.filter(isHumanPreferenceEvidence);
+  const latest = new Map();
+  for (const row of human) {
+    if (row.action !== "preference") continue;
+    const previous = latest.get(row.itemId);
+    if (!previous || row.id > previous.id) latest.set(row.itemId, row);
+  }
+  return human.filter(
+    (row) => row.action !== "preference" || latest.get(row.itemId) === row,
+  );
+}
+
+export function explicitPreference(row) {
+  return row.action === "preference"
+    ? (JSON.parse(row.metadataJson ?? "{}").signal ?? null)
+    : null;
+}
+
+export function interactionScore(row) {
+  switch (row.action) {
+    case "preference":
+      return explicitPreference(row) === "interested"
+        ? INTERACTION_WEIGHTS.interestedWeight
+        : explicitPreference(row) === "less_like_this"
+          ? INTERACTION_WEIGHTS.lessLikeThisWeight
+          : 0;
+    case "description_expand":
+      return INTERACTION_WEIGHTS.descriptionExpandWeight;
+    case "link_open":
+      return INTERACTION_WEIGHTS.linkOpenWeight;
+    case "resolve":
+      return row.resolveMode === "after_open"
+        ? INTERACTION_WEIGHTS.afterOpenResolveWeight
+        : INTERACTION_WEIGHTS.directResolveWeight;
+    default:
+      return 0;
+  }
+}
+
+export const INTERACTION_WEIGHTS = {
+  descriptionExpandWeight: 0.75,
+  linkOpenWeight: 1.5,
+  afterOpenResolveWeight: 4,
+  directResolveWeight: 0,
+  unresolveWeight: 0,
+  interestedWeight: 4,
+  lessLikeThisWeight: -4,
+};

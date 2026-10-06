@@ -9,3 +9,14 @@ playwright-report
 test-results
 tsconfig.tsbuildinfo
 analytics/out
+
+.env
+.env.*
+!.env.example
+backups
+private
+*.sqlite*
+*.db
+*.db-*
+*.jsonl
+qa

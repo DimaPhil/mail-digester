@@ -132,6 +132,7 @@ export const itemInteractions = sqliteTable("item_interactions", {
     .notNull()
     .references(() => emails.id, { onDelete: "cascade" }),
   action: text("action").notNull(),
+  actor: text("actor").notNull().default("unknown"),
   resolveMode: text("resolve_mode"),
   openedBeforeResolve: integer("opened_before_resolve", {
     mode: "boolean",

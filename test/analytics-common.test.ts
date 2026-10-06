@@ -28,7 +28,6 @@ type LoadInteractions = (input: { dbPath: string; sinceDays?: number }) => {
 };
 
 async function getLoadInteractions(): Promise<LoadInteractions> {
-  // @ts-expect-error Analytics scripts intentionally stay in .mjs for direct Node execution.
   const analyticsModule = (await import("../analytics/common.mjs")) as {
     loadInteractions: LoadInteractions;
   };
@@ -236,4 +235,29 @@ describe("filter recommendation contract", () => {
     ]);
     expect(FILTER_RULE_CONFIDENCE).toEqual(["low", "medium", "high"]);
   });
+});
+
+it("keeps unknown and automatic behavior out of preference learning", async () => {
+  const { isHumanPreferenceEvidence } = await import("../analytics/common.mjs");
+  expect(
+    isHumanPreferenceEvidence({
+      actor: "unknown",
+      action: "resolve",
+      metadataJson: null,
+    }),
+  ).toBe(false);
+  expect(
+    isHumanPreferenceEvidence({
+      actor: "human",
+      action: "resolve",
+      metadataJson: '{"bulkResolveMode":"not_interesting"}',
+    }),
+  ).toBe(false);
+  expect(
+    isHumanPreferenceEvidence({
+      actor: "human",
+      action: "preference",
+      metadataJson: '{"signal":"interested"}',
+    }),
+  ).toBe(true);
 });

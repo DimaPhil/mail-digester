@@ -1,5 +1,9 @@
 import {
   defaultDbPath,
+  explicitPreference,
+  interactionScore,
+  INTERACTION_WEIGHTS as MODEL,
+  preferenceEvidence,
   loadInteractions,
   parseFlags,
   readNumberFlag,
@@ -46,14 +50,6 @@ const STOPWORDS = new Set([
   "your",
 ]);
 
-const MODEL = {
-  descriptionExpandWeight: 0.75,
-  linkOpenWeight: 1.5,
-  afterOpenResolveWeight: 4,
-  directResolveWeight: -2,
-  unresolveWeight: 1,
-};
-
 function normalizeText(input) {
   return input
     .toLowerCase()
@@ -88,29 +84,7 @@ function titlePhrases(title) {
 }
 
 function itemKey(row) {
-  return `${row.sourceVariant}::${row.title}::${row.canonicalUrl ?? row.finalUrl ?? row.trackedUrl}`;
-}
-
-function interactionScore(row) {
-  if (row.action === "description_expand") {
-    return MODEL.descriptionExpandWeight;
-  }
-
-  if (row.action === "link_open") {
-    return MODEL.linkOpenWeight;
-  }
-
-  if (row.action === "unresolve") {
-    return MODEL.unresolveWeight;
-  }
-
-  if (row.action === "resolve") {
-    return row.resolveMode === "after_open"
-      ? MODEL.afterOpenResolveWeight
-      : MODEL.directResolveWeight;
-  }
-
-  return 0;
+  return row.itemId;
 }
 
 function buildItemSignals(interactions) {
@@ -133,6 +107,7 @@ function buildItemSignals(interactions) {
       directResolves: 0,
       afterOpenResolves: 0,
       unresolves: 0,
+      preference: null,
       firstSeenAt: row.createdAt,
       lastSeenAt: row.createdAt,
       score: 0,
@@ -141,6 +116,8 @@ function buildItemSignals(interactions) {
     current.firstSeenAt = Math.min(current.firstSeenAt, row.createdAt);
     current.lastSeenAt = Math.max(current.lastSeenAt, row.createdAt);
     current.score += interactionScore(row);
+    if (row.action === "preference")
+      current.preference = explicitPreference(row);
 
     if (row.action === "description_expand") {
       current.descriptionExpands += 1;
@@ -170,6 +147,8 @@ function emptyAggregate(key) {
     directResolves: 0,
     afterOpenResolves: 0,
     unresolves: 0,
+    interested: 0,
+    lessLikeThis: 0,
     score: 0,
   };
 }
@@ -183,6 +162,9 @@ function aggregateBy(interactions, keyForRow) {
       const aggregate = map.get(key) ?? emptyAggregate(key);
       aggregate.eventCount += 1;
       aggregate.score += interactionScore(row);
+      if (explicitPreference(row) === "interested") aggregate.interested += 1;
+      if (explicitPreference(row) === "less_like_this")
+        aggregate.lessLikeThis += 1;
 
       if (row.action === "description_expand") {
         aggregate.descriptionExpands += 1;
@@ -231,14 +213,11 @@ function buildAnalysis({ dbPath, interactions, warning, minSamples, top }) {
   const positiveSignals = [...keywords, ...titlePhraseSignals].filter(
     (signal) =>
       signal.score >= 4 &&
-      signal.afterOpenResolves + signal.linkOpens >= 2 &&
-      signal.directResolves <= signal.afterOpenResolves,
+      signal.itemCount >= 2 &&
+      signal.interested + signal.afterOpenResolves + signal.linkOpens >= 2,
   );
   const negativeSignals = [...keywords, ...titlePhraseSignals].filter(
-    (signal) =>
-      signal.score <= -4 &&
-      signal.directResolves >= 2 &&
-      signal.afterOpenResolves === 0,
+    (signal) => signal.score <= -4 && signal.lessLikeThis >= 2,
   );
 
   return {
@@ -272,7 +251,7 @@ function buildAnalysis({ dbPath, interactions, warning, minSamples, top }) {
     },
     topInterestingItems: items.filter((item) => item.score > 0).slice(0, limit),
     likelySkippedItems: [...items]
-      .filter((item) => item.directResolves > 0 && item.score < 0)
+      .filter((item) => item.preference === "less_like_this")
       .sort((a, b) => a.score - b.score)
       .slice(0, limit),
     sourceVariants: aggregateBy(interactions, (row) => [
@@ -292,15 +271,14 @@ function buildAnalysis({ dbPath, interactions, warning, minSamples, top }) {
         type: "promote",
         signal: signal.key,
         reason:
-          "Positive score from description expands, link opens, and/or resolves after opening the article.",
+          "Positive explicit preferences and/or reading engagement across multiple items.",
         score: signal.score,
         evidenceCount: signal.eventCount,
       })),
       ...negativeSignals.slice(0, limit).map((signal) => ({
         type: "deprioritize",
         signal: signal.key,
-        reason:
-          "Repeated direct resolves without prior link opens suggest low interest.",
+        reason: "Explicit less-like-this preferences on multiple items.",
         score: signal.score,
         evidenceCount: signal.eventCount,
       })),
@@ -361,8 +339,10 @@ ${analysis.warning ? `Warning: ${analysis.warning}\n` : ""}## Readiness
 - Resolved after opening link: +${analysis.model.afterOpenResolveWeight}
 - Resolved directly without opening: ${analysis.model.directResolveWeight}
 - Unresolved via undo: +${analysis.model.unresolveWeight}
+- Explicit interested: +${analysis.model.interestedWeight}
+- Explicit less like this: ${analysis.model.lessLikeThisWeight}
 
-Interpretation: expanding the newsletter description is a light interest signal, opening an item before resolving is a strong interest signal, and resolving directly is a low-interest signal because it means the item was cleared without visiting the article.
+Interpretation: use the latest explicit preference per appearance. Direct Done and Restore are neutral: a reader may finish a description without opening a link. Unknown actors and automated actions are excluded.
 
 ## Totals
 
@@ -376,7 +356,7 @@ Interpretation: expanding the newsletter description is a light interest signal,
 
 ${formatItemList(analysis.topInterestingItems)}
 
-## Likely Skipped Items
+## Explicitly Less Interesting Items
 
 ${formatItemList(analysis.likelySkippedItems)}
 
@@ -429,7 +409,7 @@ function main() {
   });
   const analysis = buildAnalysis({
     dbPath,
-    interactions: loaded.interactions,
+    interactions: preferenceEvidence(loaded.interactions),
     minSamples,
     top,
     warning: loaded.warning,

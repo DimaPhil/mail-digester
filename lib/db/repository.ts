@@ -1,461 +1,22 @@
-import { and, asc, desc, eq, inArray, isNull, lt, ne } from "drizzle-orm";
-import { getDb } from "@/lib/db";
-import {
-  aiFeatureBuildState,
-  appConfig,
-  articleSnapshots,
-  emails,
-  itemInteractions,
-  items,
-  syncState,
-} from "@/lib/db/schema";
-import type { ParsedDigestEmail } from "@/lib/digest/types";
-import {
-  normalizeAiFeaturePrompt,
-  type AiFeatureClassification,
-  type AiFeatureStatus,
-  UNCLASSIFIED_AI_FEATURE,
-} from "@/lib/inbox/ai-feature";
-import {
-  normalizeInterestPrompt,
-  type ItemInterestClassification,
-  type ItemInterestStatus,
-  UNCLASSIFIED_ITEM_INTEREST,
-} from "@/lib/inbox/interest";
+import { asc, desc } from "drizzle-orm";
+import { getDb, getSqlite } from "@/lib/db";
+import { emails, items } from "@/lib/db/schema";
 import { nowTs } from "@/lib/utils";
-
 export type ItemInteractionAction =
+  | "reader_open"
+  | "preference"
   | "description_expand"
   | "link_open"
   | "resolve"
   | "unresolve";
-
 export type ItemInteractionMetadata = Record<
   string,
   boolean | number | string | null | undefined
 >;
-
-export type InboxEmailItem = {
-  id: number;
-  emailId: number;
-  section: string;
-  position: number;
-  title: string;
-  summary: string;
-  readTimeText: string | null;
-  itemKind: string;
-  trackedUrl: string;
-  canonicalUrl: string | null;
-  finalUrl: string | null;
-  interestStatus: ItemInterestStatus;
-  interestReason: string | null;
-  interestModel: string | null;
-  interestPromptVersion: number | null;
-  interestClassifiedAt: number | null;
-  interestNeedsRefresh: boolean;
-  aiFeatureStatus: AiFeatureStatus;
-  aiFeatureReason: string | null;
-  aiFeatureModel: string | null;
-  aiFeaturePromptVersion: number | null;
-  aiFeatureClassifiedAt: number | null;
-  aiFeatureNeedsRefresh: boolean;
-  resolvedAt: number | null;
-};
-
-export type InboxEmail = {
-  id: number;
-  provider: string;
-  providerMessageId: string;
-  providerThreadId: string | null;
-  sourceFamily: string;
-  sourceVariant: string;
-  senderName: string;
-  senderEmail: string;
-  subject: string;
-  snippet: string;
-  receivedAt: number;
-  completionState: string;
-  gmailSyncPending: boolean;
-  totalItems: number;
-  resolvedItems: number;
-  createdAt: number;
-  updatedAt: number;
+export type InboxEmailItem = typeof items.$inferSelect;
+export type InboxEmail = typeof emails.$inferSelect & {
   items: InboxEmailItem[];
 };
-
-export type SyncStateRecord = {
-  status: string;
-  phase: string;
-  message: string;
-  discoveredEmails: number;
-  processedEmails: number;
-  active: boolean;
-  lastStartedAt: number | null;
-  lastFinishedAt: number | null;
-  lastSuccessfulSyncStartedAt: number | null;
-  lastError: string | null;
-  updatedAt: number;
-};
-
-export type AiFeatureBuildStateRecord = {
-  status: string;
-  phase: string;
-  message: string;
-  discoveredItems: number;
-  processedItems: number;
-  active: boolean;
-  includeResolvedItems: boolean;
-  lastStartedAt: number | null;
-  lastFinishedAt: number | null;
-  lastError: string | null;
-  updatedAt: number;
-};
-
-export type AppConfigRecord = typeof appConfig.$inferSelect;
-export type SnapshotRecord = typeof articleSnapshots.$inferSelect;
-export type ItemInteractionRecord = typeof itemInteractions.$inferSelect;
-
-export type ItemInterestInputRecord = {
-  itemId: number;
-  emailId: number;
-  emailReceivedAt: number;
-  sourceVariant: string;
-  emailSubject: string;
-  senderName: string;
-  senderEmail: string;
-  section: string;
-  position: number;
-  title: string;
-  summary: string;
-  readTimeText: string | null;
-  itemKind: string;
-  trackedUrl: string;
-  canonicalUrl: string | null;
-  finalUrl: string | null;
-};
-
-export async function setSyncState(
-  input: Partial<SyncStateRecord> &
-    Pick<SyncStateRecord, "status" | "phase" | "message">,
-) {
-  const db = getDb();
-  const current = await getSyncState();
-  const nextUpdatedAt = nowTs();
-
-  await db
-    .update(syncState)
-    .set({
-      status: input.status,
-      phase: input.phase,
-      message: input.message,
-      discoveredEmails: input.discoveredEmails ?? current.discoveredEmails,
-      processedEmails: input.processedEmails ?? current.processedEmails,
-      active: input.active ?? current.active,
-      lastStartedAt:
-        input.lastStartedAt === undefined
-          ? current.lastStartedAt
-          : input.lastStartedAt,
-      lastFinishedAt:
-        input.lastFinishedAt === undefined
-          ? current.lastFinishedAt
-          : input.lastFinishedAt,
-      lastSuccessfulSyncStartedAt:
-        input.lastSuccessfulSyncStartedAt === undefined
-          ? current.lastSuccessfulSyncStartedAt
-          : input.lastSuccessfulSyncStartedAt,
-      lastError:
-        input.lastError === undefined ? current.lastError : input.lastError,
-      updatedAt: nextUpdatedAt,
-    })
-    .where(eq(syncState.id, 1));
-}
-
-export async function getSyncState(): Promise<SyncStateRecord> {
-  const db = getDb();
-  const state = await db.query.syncState.findFirst({
-    where: eq(syncState.id, 1),
-  });
-
-  if (!state) {
-    throw new Error("Sync state row was not initialized.");
-  }
-
-  return state;
-}
-
-export async function setAiFeatureBuildState(
-  input: Partial<AiFeatureBuildStateRecord> &
-    Pick<AiFeatureBuildStateRecord, "status" | "phase" | "message">,
-) {
-  const db = getDb();
-  const current = await getAiFeatureBuildState();
-  const nextUpdatedAt = nowTs();
-
-  await db
-    .update(aiFeatureBuildState)
-    .set({
-      status: input.status,
-      phase: input.phase,
-      message: input.message,
-      discoveredItems: input.discoveredItems ?? current.discoveredItems,
-      processedItems: input.processedItems ?? current.processedItems,
-      active: input.active ?? current.active,
-      includeResolvedItems:
-        input.includeResolvedItems ?? current.includeResolvedItems,
-      lastStartedAt:
-        input.lastStartedAt === undefined
-          ? current.lastStartedAt
-          : input.lastStartedAt,
-      lastFinishedAt:
-        input.lastFinishedAt === undefined
-          ? current.lastFinishedAt
-          : input.lastFinishedAt,
-      lastError:
-        input.lastError === undefined ? current.lastError : input.lastError,
-      updatedAt: nextUpdatedAt,
-    })
-    .where(eq(aiFeatureBuildState.id, 1));
-}
-
-export async function getAiFeatureBuildState(): Promise<AiFeatureBuildStateRecord> {
-  const db = getDb();
-  const state = await db.query.aiFeatureBuildState.findFirst({
-    where: eq(aiFeatureBuildState.id, 1),
-  });
-
-  if (!state) {
-    throw new Error("AI feature build state row was not initialized.");
-  }
-
-  return state;
-}
-
-export async function getAppConfig(): Promise<AppConfigRecord> {
-  const db = getDb();
-  const config = await db.query.appConfig.findFirst({
-    where: eq(appConfig.id, 1),
-  });
-
-  if (!config) {
-    throw new Error("App config row was not initialized.");
-  }
-
-  return config;
-}
-
-export async function updateAppConfigPrompt(
-  prompt: string | null | undefined,
-): Promise<AppConfigRecord> {
-  const db = getDb();
-  const current = await getAppConfig();
-  const nextPrompt = normalizeInterestPrompt(prompt);
-  const nextVersion =
-    nextPrompt === current.interestPrompt
-      ? current.interestPromptVersion
-      : current.interestPromptVersion + 1;
-
-  await db
-    .update(appConfig)
-    .set({
-      interestPrompt: nextPrompt,
-      interestPromptVersion: nextVersion,
-      updatedAt: nowTs(),
-    })
-    .where(eq(appConfig.id, 1));
-
-  return getAppConfig();
-}
-
-export async function updateAppConfigAiFeaturePrompt(
-  prompt: string | null | undefined,
-): Promise<AppConfigRecord> {
-  const db = getDb();
-  const current = await getAppConfig();
-  const nextPrompt = normalizeAiFeaturePrompt(prompt);
-  const nextVersion =
-    nextPrompt === current.aiFeaturePrompt
-      ? current.aiFeaturePromptVersion
-      : current.aiFeaturePromptVersion + 1;
-
-  await db
-    .update(appConfig)
-    .set({
-      aiFeaturePrompt: nextPrompt,
-      aiFeaturePromptVersion: nextVersion,
-      updatedAt: nowTs(),
-    })
-    .where(eq(appConfig.id, 1));
-
-  return getAppConfig();
-}
-
-export async function upsertParsedEmail(
-  parsed: ParsedDigestEmail,
-  options?: { preserveResolvedItemInterests?: boolean },
-) {
-  const db = getDb();
-  const timestamp = nowTs();
-
-  await db
-    .insert(emails)
-    .values({
-      provider: "gmail",
-      providerMessageId: parsed.providerMessageId,
-      providerThreadId: parsed.providerThreadId,
-      sourceFamily: parsed.sourceFamily,
-      sourceVariant: parsed.sourceVariant,
-      senderName: parsed.senderName,
-      senderEmail: parsed.senderEmail,
-      subject: parsed.subject,
-      snippet: parsed.snippet,
-      receivedAt: parsed.receivedAt,
-      completionState: "active",
-      gmailSyncPending: false,
-      totalItems: parsed.items.length,
-      resolvedItems: 0,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    })
-    .onConflictDoUpdate({
-      target: [emails.provider, emails.providerMessageId],
-      set: {
-        providerThreadId: parsed.providerThreadId,
-        sourceFamily: parsed.sourceFamily,
-        sourceVariant: parsed.sourceVariant,
-        senderName: parsed.senderName,
-        senderEmail: parsed.senderEmail,
-        subject: parsed.subject,
-        snippet: parsed.snippet,
-        receivedAt: parsed.receivedAt,
-        totalItems: parsed.items.length,
-        updatedAt: timestamp,
-      },
-    });
-
-  const email = await db.query.emails.findFirst({
-    where: and(
-      eq(emails.provider, "gmail"),
-      eq(emails.providerMessageId, parsed.providerMessageId),
-    ),
-  });
-
-  if (!email) {
-    throw new Error("Email upsert failed.");
-  }
-
-  const existingItems = await db.query.items.findMany({
-    where: eq(items.emailId, email.id),
-  });
-  const existingItemsBySourceItemId = new Map(
-    existingItems.map((item) => [item.sourceItemId, item]),
-  );
-
-  for (const item of parsed.items) {
-    const existingItem = existingItemsBySourceItemId.get(item.sourceItemId);
-    const interest =
-      options?.preserveResolvedItemInterests && existingItem?.resolvedAt != null
-        ? {
-            interestStatus: existingItem.interestStatus as ItemInterestStatus,
-            interestReason: existingItem.interestReason,
-            interestModel: existingItem.interestModel,
-            interestPromptVersion: existingItem.interestPromptVersion,
-            interestClassifiedAt: existingItem.interestClassifiedAt,
-            aiFeatureStatus: existingItem.aiFeatureStatus as AiFeatureStatus,
-            aiFeatureReason: existingItem.aiFeatureReason,
-            aiFeatureModel: existingItem.aiFeatureModel,
-            aiFeaturePromptVersion: existingItem.aiFeaturePromptVersion,
-            aiFeatureClassifiedAt: existingItem.aiFeatureClassifiedAt,
-          }
-        : {
-            ...(item.interest ?? UNCLASSIFIED_ITEM_INTEREST),
-            ...(item.aiFeature ?? UNCLASSIFIED_AI_FEATURE),
-          };
-    await db
-      .insert(items)
-      .values({
-        emailId: email.id,
-        sourceItemId: item.sourceItemId,
-        section: item.section,
-        position: item.position,
-        title: item.title,
-        summary: item.summary,
-        readTimeText: item.readTimeText,
-        itemKind: item.itemKind,
-        trackedUrl: item.trackedUrl,
-        canonicalUrl: item.canonicalUrl,
-        finalUrl: item.finalUrl,
-        interestStatus: interest.interestStatus,
-        interestReason: interest.interestReason,
-        interestModel: interest.interestModel,
-        interestPromptVersion: interest.interestPromptVersion,
-        interestClassifiedAt: interest.interestClassifiedAt,
-        aiFeatureStatus: interest.aiFeatureStatus,
-        aiFeatureReason: interest.aiFeatureReason,
-        aiFeatureModel: interest.aiFeatureModel,
-        aiFeaturePromptVersion: interest.aiFeaturePromptVersion,
-        aiFeatureClassifiedAt: interest.aiFeatureClassifiedAt,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      })
-      .onConflictDoUpdate({
-        target: [items.emailId, items.sourceItemId],
-        set: {
-          section: item.section,
-          position: item.position,
-          title: item.title,
-          summary: item.summary,
-          readTimeText: item.readTimeText,
-          itemKind: item.itemKind,
-          trackedUrl: item.trackedUrl,
-          canonicalUrl: item.canonicalUrl,
-          finalUrl: item.finalUrl,
-          interestStatus: interest.interestStatus,
-          interestReason: interest.interestReason,
-          interestModel: interest.interestModel,
-          interestPromptVersion: interest.interestPromptVersion,
-          interestClassifiedAt: interest.interestClassifiedAt,
-          aiFeatureStatus: interest.aiFeatureStatus,
-          aiFeatureReason: interest.aiFeatureReason,
-          aiFeatureModel: interest.aiFeatureModel,
-          aiFeaturePromptVersion: interest.aiFeaturePromptVersion,
-          aiFeatureClassifiedAt: interest.aiFeatureClassifiedAt,
-          updatedAt: timestamp,
-        },
-      });
-  }
-
-  await refreshEmailCounts(email.id);
-  return email.id;
-}
-
-export async function refreshEmailCounts(emailId: number) {
-  const db = getDb();
-  const allItems = await db.query.items.findMany({
-    where: eq(items.emailId, emailId),
-  });
-  const totalItems = allItems.length;
-  const resolvedItems = allItems.filter(
-    (item) => item.resolvedAt != null,
-  ).length;
-
-  await db
-    .update(emails)
-    .set({
-      totalItems,
-      resolvedItems,
-      completionState:
-        totalItems > 0 && totalItems === resolvedItems ? "complete" : "active",
-      updatedAt: nowTs(),
-    })
-    .where(eq(emails.id, emailId));
-
-  return {
-    totalItems,
-    resolvedItems,
-    complete: totalItems > 0 && totalItems === resolvedItems,
-  };
-}
-
 export async function listInboxEmails() {
   const db = getDb();
   const emailRows = await db.query.emails.findMany({
@@ -467,360 +28,95 @@ export async function listInboxEmails() {
   }
 
   const itemRows = await db.query.items.findMany({
-    where: inArray(
-      items.emailId,
-      emailRows.map((email) => email.id),
-    ),
     orderBy: [asc(items.position)],
   });
 
+  const itemsByEmail = Map.groupBy(itemRows, (item) => item.emailId);
   return emailRows.map((email) => ({
     ...email,
-    items: itemRows
-      .filter((item) => item.emailId === email.id)
-      .sort((a, b) => a.position - b.position)
-      .map((item) => ({
-        ...item,
-        interestStatus: item.interestStatus as ItemInterestStatus,
-        aiFeatureStatus: item.aiFeatureStatus as AiFeatureStatus,
-        interestNeedsRefresh: false,
-        aiFeatureNeedsRefresh: false,
-      })),
+    items: itemsByEmail.get(email.id) ?? [],
   }));
 }
 
-export async function getItemById(itemId: number) {
-  const db = getDb();
-  return db.query.items.findFirst({
-    where: eq(items.id, itemId),
-  });
-}
-
-export async function getEmailById(emailId: number) {
-  const db = getDb();
-  return db.query.emails.findFirst({
-    where: eq(emails.id, emailId),
-  });
-}
-
-export async function listItemInterestInputs(options?: {
-  includeResolved?: boolean;
-}) {
-  const db = getDb();
-  return db
-    .select({
-      itemId: items.id,
-      emailId: items.emailId,
-      emailReceivedAt: emails.receivedAt,
-      sourceVariant: emails.sourceVariant,
-      emailSubject: emails.subject,
-      senderName: emails.senderName,
-      senderEmail: emails.senderEmail,
-      section: items.section,
-      position: items.position,
-      title: items.title,
-      summary: items.summary,
-      readTimeText: items.readTimeText,
-      itemKind: items.itemKind,
-      trackedUrl: items.trackedUrl,
-      canonicalUrl: items.canonicalUrl,
-      finalUrl: items.finalUrl,
-    })
-    .from(items)
-    .innerJoin(emails, eq(items.emailId, emails.id))
-    .where(options?.includeResolved ? undefined : isNull(items.resolvedAt))
-    .orderBy(desc(emails.receivedAt), asc(items.position));
-}
-
-export async function listNonInterestingBulkResolveCandidates(input: {
-  promptVersion: number;
-  receivedBeforeTs: number;
-  excludeAiListItems?: boolean;
-}) {
-  const db = getDb();
-  return db
-    .select({
-      itemId: items.id,
-      emailId: items.emailId,
-    })
-    .from(items)
-    .innerJoin(emails, eq(items.emailId, emails.id))
-    .where(
-      and(
-        eq(items.interestStatus, "not_interesting"),
-        eq(items.interestPromptVersion, input.promptVersion),
-        isNull(items.resolvedAt),
-        input.excludeAiListItems
-          ? ne(items.aiFeatureStatus, "included")
-          : undefined,
-        lt(emails.receivedAt, input.receivedBeforeTs),
-      ),
-    );
-}
-
-export async function updateItemInterest(
-  itemId: number,
-  classification: ItemInterestClassification,
-) {
-  const db = getDb();
-  await db
-    .update(items)
-    .set({
-      interestStatus: classification.interestStatus,
-      interestReason: classification.interestReason,
-      interestModel: classification.interestModel,
-      interestPromptVersion: classification.interestPromptVersion,
-      interestClassifiedAt: classification.interestClassifiedAt,
-      updatedAt: nowTs(),
-    })
-    .where(eq(items.id, itemId));
-}
-
-export async function updateItemAiFeature(
-  itemId: number,
-  classification: AiFeatureClassification,
-) {
-  const db = getDb();
-  await db
-    .update(items)
-    .set({
-      aiFeatureStatus: classification.aiFeatureStatus,
-      aiFeatureReason: classification.aiFeatureReason,
-      aiFeatureModel: classification.aiFeatureModel,
-      aiFeaturePromptVersion: classification.aiFeaturePromptVersion,
-      aiFeatureClassifiedAt: classification.aiFeatureClassifiedAt,
-      updatedAt: nowTs(),
-    })
-    .where(eq(items.id, itemId));
-}
-
-export async function clearItemInterests() {
-  const db = getDb();
-  await db.update(items).set({
-    interestStatus: UNCLASSIFIED_ITEM_INTEREST.interestStatus,
-    interestReason: UNCLASSIFIED_ITEM_INTEREST.interestReason,
-    interestModel: UNCLASSIFIED_ITEM_INTEREST.interestModel,
-    interestPromptVersion: UNCLASSIFIED_ITEM_INTEREST.interestPromptVersion,
-    interestClassifiedAt: UNCLASSIFIED_ITEM_INTEREST.interestClassifiedAt,
-    updatedAt: nowTs(),
-  });
-}
-
-export async function clearItemAiFeatures() {
-  const db = getDb();
-  await db.update(items).set({
-    aiFeatureStatus: UNCLASSIFIED_AI_FEATURE.aiFeatureStatus,
-    aiFeatureReason: UNCLASSIFIED_AI_FEATURE.aiFeatureReason,
-    aiFeatureModel: UNCLASSIFIED_AI_FEATURE.aiFeatureModel,
-    aiFeaturePromptVersion: UNCLASSIFIED_AI_FEATURE.aiFeaturePromptVersion,
-    aiFeatureClassifiedAt: UNCLASSIFIED_AI_FEATURE.aiFeatureClassifiedAt,
-    updatedAt: nowTs(),
-  });
-}
-
-export async function recordItemInteraction(
+export function recordItemInteraction(
   itemId: number,
   action: ItemInteractionAction,
   metadata: ItemInteractionMetadata = {},
 ) {
-  const db = getDb();
-  const item = await getItemById(itemId);
-  if (!item) {
-    throw new Error("Item not found.");
-  }
-
-  const email = await getEmailById(item.emailId);
-  if (!email) {
-    throw new Error("Email not found.");
-  }
-
-  const existingOpens =
+  const db = getSqlite();
+  const row = db
+    .prepare(
+      `SELECT i.*, e.provider, e.provider_message_id, e.provider_thread_id, e.source_family, e.source_variant, e.sender_name, e.sender_email, e.subject, e.received_at FROM items i JOIN emails e ON e.id = i.email_id WHERE i.id = ?`,
+    )
+    .get(itemId) as Record<string, string | number | null> | undefined;
+  if (!row) throw new Error("Item not found");
+  const opened =
     action === "resolve"
-      ? await db.query.itemInteractions.findMany({
-          where: and(
-            eq(itemInteractions.itemId, itemId),
-            eq(itemInteractions.action, "link_open"),
-          ),
-          limit: 1,
-        })
-      : [];
-  const clientOpenedBeforeResolve = metadata.clientOpenedBeforeResolve === true;
-  const openedBeforeResolve =
-    action === "resolve"
-      ? existingOpens.length > 0 || clientOpenedBeforeResolve
+      ? Boolean(
+          db
+            .prepare(
+              "SELECT 1 FROM item_interactions WHERE item_id = ? AND action = 'link_open' LIMIT 1",
+            )
+            .get(itemId),
+        )
       : null;
-  const metadataJson =
-    Object.keys(metadata).length > 0 ? JSON.stringify(metadata) : null;
-
-  await db.insert(itemInteractions).values({
+  const columns = [
+    "item_id",
+    "email_id",
+    "action",
+    "actor",
+    "resolve_mode",
+    "opened_before_resolve",
+    "provider",
+    "provider_message_id",
+    "provider_thread_id",
+    "source_family",
+    "source_variant",
+    "sender_name",
+    "sender_email",
+    "email_subject",
+    "email_received_at",
+    "section",
+    "position",
+    "item_kind",
+    "read_time_text",
+    "title",
+    "full_description",
+    "tracked_url",
+    "canonical_url",
+    "final_url",
+    "metadata_json",
+    "created_at",
+  ];
+  const values = [
     itemId,
-    emailId: email.id,
+    row.email_id,
     action,
-    resolveMode:
-      action === "resolve"
-        ? openedBeforeResolve
-          ? "after_open"
-          : "direct"
-        : null,
-    openedBeforeResolve,
-    provider: email.provider,
-    providerMessageId: email.providerMessageId,
-    providerThreadId: email.providerThreadId,
-    sourceFamily: email.sourceFamily,
-    sourceVariant: email.sourceVariant,
-    senderName: email.senderName,
-    senderEmail: email.senderEmail,
-    emailSubject: email.subject,
-    emailReceivedAt: email.receivedAt,
-    section: item.section,
-    position: item.position,
-    itemKind: item.itemKind,
-    readTimeText: item.readTimeText,
-    title: item.title,
-    fullDescription: item.summary,
-    trackedUrl: item.trackedUrl,
-    canonicalUrl: item.canonicalUrl,
-    finalUrl: item.finalUrl,
-    metadataJson,
-    createdAt: nowTs(),
-  });
-}
-
-export async function listItemInteractions() {
-  const db = getDb();
-  return db.query.itemInteractions.findMany({
-    orderBy: [asc(itemInteractions.createdAt)],
-  });
-}
-
-export async function markItemResolved(itemId: number, resolvedAt = nowTs()) {
-  const db = getDb();
-
-  await db
-    .update(items)
-    .set({
-      resolvedAt,
-      updatedAt: resolvedAt,
-    })
-    .where(eq(items.id, itemId));
-
-  const item = await getItemById(itemId);
-  if (!item) {
-    throw new Error("Item not found after resolve.");
-  }
-
-  return refreshEmailCounts(item.emailId);
-}
-
-export async function markItemUnresolved(itemId: number) {
-  const db = getDb();
-  const timestamp = nowTs();
-
-  await db
-    .update(items)
-    .set({
-      resolvedAt: null,
-      updatedAt: timestamp,
-    })
-    .where(eq(items.id, itemId));
-
-  const item = await getItemById(itemId);
-  if (!item) {
-    throw new Error("Item not found after unresolve.");
-  }
-
-  await db
-    .update(emails)
-    .set({
-      gmailSyncPending: false,
-      updatedAt: timestamp,
-    })
-    .where(eq(emails.id, item.emailId));
-
-  return refreshEmailCounts(item.emailId);
-}
-
-export async function setEmailGmailSyncPending(
-  emailId: number,
-  pending: boolean,
-) {
-  const db = getDb();
-  await db
-    .update(emails)
-    .set({
-      gmailSyncPending: pending,
-      updatedAt: nowTs(),
-    })
-    .where(eq(emails.id, emailId));
-}
-
-export async function getSnapshotByUrlKey(urlKey: string) {
-  const db = getDb();
-  return db.query.articleSnapshots.findFirst({
-    where: eq(articleSnapshots.urlKey, urlKey),
-  });
-}
-
-export async function upsertSnapshot(
-  urlKey: string,
-  input: Partial<SnapshotRecord> &
-    Pick<SnapshotRecord, "status" | "sourceUrl" | "finalUrl">,
-) {
-  const db = getDb();
-  const timestamp = nowTs();
-
-  await db
-    .insert(articleSnapshots)
-    .values({
-      urlKey,
-      status: input.status,
-      sourceUrl: input.sourceUrl,
-      finalUrl: input.finalUrl,
-      title: input.title ?? null,
-      byline: input.byline ?? null,
-      siteName: input.siteName ?? null,
-      excerpt: input.excerpt ?? null,
-      contentHtml: input.contentHtml ?? null,
-      contentText: input.contentText ?? null,
-      errorMessage: input.errorMessage ?? null,
-      fetchedAt: input.fetchedAt ?? null,
-      updatedAt: timestamp,
-    })
-    .onConflictDoUpdate({
-      target: articleSnapshots.urlKey,
-      set: {
-        status: input.status,
-        sourceUrl: input.sourceUrl,
-        finalUrl: input.finalUrl,
-        title: input.title ?? null,
-        byline: input.byline ?? null,
-        siteName: input.siteName ?? null,
-        excerpt: input.excerpt ?? null,
-        contentHtml: input.contentHtml ?? null,
-        contentText: input.contentText ?? null,
-        errorMessage: input.errorMessage ?? null,
-        fetchedAt: input.fetchedAt ?? null,
-        updatedAt: timestamp,
-      },
-    });
-
-  return getSnapshotByUrlKey(urlKey);
-}
-
-export async function updateItemUrls(
-  itemId: number,
-  input: {
-    canonicalUrl: string | null;
-    finalUrl: string | null;
-  },
-) {
-  const db = getDb();
-  await db
-    .update(items)
-    .set({
-      canonicalUrl: input.canonicalUrl,
-      finalUrl: input.finalUrl,
-      updatedAt: nowTs(),
-    })
-    .where(eq(items.id, itemId));
+    "human",
+    action === "resolve" ? (opened ? "after_open" : "direct") : null,
+    opened == null ? null : Number(opened),
+    row.provider,
+    row.provider_message_id,
+    row.provider_thread_id,
+    row.source_family,
+    row.source_variant,
+    row.sender_name,
+    row.sender_email,
+    row.subject,
+    row.received_at,
+    row.section,
+    row.position,
+    row.item_kind,
+    row.read_time_text,
+    row.title,
+    row.summary,
+    row.tracked_url,
+    row.canonical_url,
+    row.final_url,
+    Object.keys(metadata).length ? JSON.stringify(metadata) : null,
+    nowTs(),
+  ];
+  db.prepare(
+    `INSERT INTO item_interactions (${columns.join(",")}) VALUES (${columns.map(() => "?").join(",")})`,
+  ).run(...values);
 }

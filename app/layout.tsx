@@ -4,7 +4,8 @@ import { APP_NAME } from "@/lib/config";
 
 export const metadata: Metadata = {
   title: APP_NAME,
-  description: "Clear unread TLDR newsletters with an extraction-first reader.",
+  description:
+    "A private reading library for links, context, and thoughtful discovery.",
 };
 
 export default function RootLayout({

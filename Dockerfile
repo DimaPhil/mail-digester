@@ -1,4 +1,4 @@
-FROM node:20-trixie-slim AS base
+FROM node:24-trixie-slim AS base
 
 ENV NEXT_TELEMETRY_DISABLED=1
 WORKDIR /app
@@ -18,7 +18,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
-FROM node:20-trixie-slim AS runner
+FROM node:24-trixie-slim AS runner
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -29,14 +29,14 @@ WORKDIR /app
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates \
-  && npm install -g @googleworkspace/cli \
   && rm -rf /var/lib/apt/lists/* \
-  && mkdir -p /app/data /home/node/.config \
+  && mkdir -p /app/data \
   && chown -R node:node /app /home/node
 
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=builder --chown=node:node /app/analytics ./analytics
+COPY --from=builder --chown=node:node /app/scripts/db-maintenance.mjs ./scripts/db-maintenance.mjs
 
 USER node
 

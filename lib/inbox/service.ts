@@ -1,931 +1,151 @@
+import { defaultCollections } from "@/lib/navigation";
+import navigationConfig from "@/config/navigation.json";
+import { getSqlite } from "@/lib/db";
 import {
-  INTEREST_CLASSIFICATION_CONCURRENCY,
-  OPENAI_API_KEY,
-  OPENAI_MODEL,
-} from "@/lib/config";
-import { fetchReadableSnapshot } from "@/lib/content/readability";
-import { canonicalizeUrl } from "@/lib/content/url";
-import {
-  clearItemAiFeatures,
-  clearItemInterests,
-  getAiFeatureBuildState,
-  getAppConfig,
-  getEmailById,
-  getItemById,
-  getSnapshotByUrlKey,
-  getSyncState,
   listInboxEmails,
-  listItemInterestInputs,
-  listNonInterestingBulkResolveCandidates,
-  markItemResolved,
-  markItemUnresolved,
   recordItemInteraction,
-  refreshEmailCounts,
-  setAiFeatureBuildState,
-  setEmailGmailSyncPending,
-  setSyncState,
-  updateAppConfigAiFeaturePrompt,
-  updateAppConfigPrompt,
-  updateItemAiFeature,
-  updateItemInterest,
-  updateItemUrls,
-  upsertParsedEmail,
-  upsertSnapshot,
-  type AiFeatureBuildStateRecord,
-  type AppConfigRecord,
-  type InboxEmail,
   type ItemInteractionMetadata,
 } from "@/lib/db/repository";
-import { pickDigestSource } from "@/lib/digest";
-import type { ParsedDigestEmail, ParsedDigestItem } from "@/lib/digest/types";
-import {
-  FixtureAiFeatureClassifier,
-  OpenAIAiFeatureClassifier,
-  type AiFeatureClassifier,
-} from "@/lib/inbox/ai-feature-classifier";
-import { normalizeAiFeaturePrompt } from "@/lib/inbox/ai-feature";
-import {
-  FixtureInterestClassifier,
-  OpenAIInterestClassifier,
-  type InterestClassifier,
-} from "@/lib/inbox/interest-classifier";
-import { normalizeInterestPrompt } from "@/lib/inbox/interest";
-import { FixtureMailProvider } from "@/lib/mail/providers/fixture";
-import { GmailGwsProvider } from "@/lib/mail/providers/gmail-gws";
-import type { MailProvider } from "@/lib/mail/types";
-import { nowTs } from "@/lib/utils";
-
-let syncPromise: Promise<void> | null = null;
-let aiFeatureBuildPromise: Promise<void> | null = null;
-
-export type InboxServices = {
-  mailProvider: MailProvider;
-  interestClassifier: InterestClassifier;
-  aiFeatureClassifier: AiFeatureClassifier;
-};
-
-export type SyncInboxOptions = {
-  forceFullResync?: boolean;
-  includeResolvedItemsInRecheck?: boolean;
-};
-
-export type InboxAppConfig = {
-  interestPrompt: string;
-  interestPromptVersion: number;
-  aiFeaturePrompt: string;
-  aiFeaturePromptVersion: number;
-  openAiApiKeyConfigured: boolean;
-  openAiModel: string;
-  interestRefreshPendingCount: number;
-  aiFeatureRefreshPendingCount: number;
-};
-
-export type InboxAiFeatureBuildState = AiFeatureBuildStateRecord;
-
-export function createInboxServices(
-  overrides: Partial<InboxServices> = {},
-): InboxServices {
-  const useFixtures =
-    process.env.MAIL_DIGESTER_USE_FIXTURE_DATA === "1" ||
-    process.env.NODE_ENV === "test";
-
-  return {
-    mailProvider:
-      overrides.mailProvider ??
-      (useFixtures ? new FixtureMailProvider() : new GmailGwsProvider()),
-    interestClassifier:
-      overrides.interestClassifier ??
-      (useFixtures
-        ? new FixtureInterestClassifier()
-        : new OpenAIInterestClassifier()),
-    aiFeatureClassifier:
-      overrides.aiFeatureClassifier ??
-      (useFixtures
-        ? new FixtureAiFeatureClassifier()
-        : new OpenAIAiFeatureClassifier()),
-  };
-}
-
-function decorateInboxEmails(emails: InboxEmail[], appConfig: AppConfigRecord) {
-  const hasInterestPrompt =
-    normalizeInterestPrompt(appConfig.interestPrompt) != null;
-  const hasAiFeaturePrompt =
-    normalizeAiFeaturePrompt(appConfig.aiFeaturePrompt) != null;
-  let interestRefreshPendingCount = 0;
-  let aiFeatureRefreshPendingCount = 0;
-
-  const decoratedEmails = emails.map((email) => ({
-    ...email,
-    items: email.items.map((item) => {
-      const interestNeedsRefresh =
-        hasInterestPrompt &&
-        item.interestPromptVersion !== appConfig.interestPromptVersion;
-      const aiFeatureNeedsRefresh =
-        hasAiFeaturePrompt &&
-        item.aiFeaturePromptVersion !== appConfig.aiFeaturePromptVersion;
-
-      if (interestNeedsRefresh) {
-        interestRefreshPendingCount += 1;
-      }
-
-      if (aiFeatureNeedsRefresh) {
-        aiFeatureRefreshPendingCount += 1;
-      }
-
-      return {
-        ...item,
-        interestStatus:
-          !hasInterestPrompt || interestNeedsRefresh
-            ? ("unclassified" as const)
-            : item.interestStatus,
-        interestReason:
-          !hasInterestPrompt || interestNeedsRefresh
-            ? null
-            : item.interestReason,
-        interestModel:
-          !hasInterestPrompt || interestNeedsRefresh
-            ? null
-            : item.interestModel,
-        interestClassifiedAt:
-          !hasInterestPrompt || interestNeedsRefresh
-            ? null
-            : item.interestClassifiedAt,
-        interestNeedsRefresh,
-        aiFeatureStatus:
-          !hasAiFeaturePrompt || aiFeatureNeedsRefresh
-            ? ("unclassified" as const)
-            : item.aiFeatureStatus,
-        aiFeatureReason:
-          !hasAiFeaturePrompt || aiFeatureNeedsRefresh
-            ? null
-            : item.aiFeatureReason,
-        aiFeatureModel:
-          !hasAiFeaturePrompt || aiFeatureNeedsRefresh
-            ? null
-            : item.aiFeatureModel,
-        aiFeatureClassifiedAt:
-          !hasAiFeaturePrompt || aiFeatureNeedsRefresh
-            ? null
-            : item.aiFeatureClassifiedAt,
-        aiFeatureNeedsRefresh,
-      };
-    }),
-  }));
-
-  return {
-    emails: decoratedEmails,
-    interestRefreshPendingCount,
-    aiFeatureRefreshPendingCount,
-  };
-}
-
-function toInboxAppConfig(
-  appConfig: AppConfigRecord,
-  interestRefreshPendingCount: number,
-  aiFeatureRefreshPendingCount: number,
-): InboxAppConfig {
-  return {
-    interestPrompt: appConfig.interestPrompt ?? "",
-    interestPromptVersion: appConfig.interestPromptVersion,
-    aiFeaturePrompt: appConfig.aiFeaturePrompt ?? "",
-    aiFeaturePromptVersion: appConfig.aiFeaturePromptVersion,
-    openAiApiKeyConfigured: Boolean(OPENAI_API_KEY),
-    openAiModel: OPENAI_MODEL,
-    interestRefreshPendingCount,
-    aiFeatureRefreshPendingCount,
-  };
-}
-
-async function listVisibleInboxEmails() {
-  const [emails, appConfig] = await Promise.all([
-    listInboxEmails(),
-    getAppConfig(),
-  ]);
-  return decorateInboxEmails(emails, appConfig).emails;
-}
-
-async function shouldAutoSyncInbox(
-  lastSuccessfulSyncStartedAt: number | null,
-  services: InboxServices,
-) {
-  try {
-    const refs = await services.mailProvider.listUnreadCandidates({
-      afterTs: lastSuccessfulSyncStartedAt,
-    });
-    return refs.length > 0;
-  } catch {
-    return false;
-  }
-}
-
-function resolveInboxServices(overrides: Partial<InboxServices> = {}) {
-  return createInboxServices(overrides);
-}
-
-async function mapWithConcurrency<T, TResult>(
-  inputs: T[],
-  concurrency: number,
-  mapper: (input: T, index: number) => Promise<TResult>,
-) {
-  if (inputs.length === 0) {
-    return [] satisfies TResult[];
-  }
-
-  const results = new Array<TResult>(inputs.length);
-  let nextIndex = 0;
-  const workerCount = Math.min(concurrency, inputs.length);
-
-  await Promise.all(
-    Array.from({ length: workerCount }, async () => {
-      while (true) {
-        const currentIndex = nextIndex;
-        nextIndex += 1;
-
-        if (currentIndex >= inputs.length) {
-          return;
-        }
-
-        results[currentIndex] = await mapper(
-          inputs[currentIndex],
-          currentIndex,
-        );
-      }
-    }),
+import { safeExternalUrl } from "@/lib/content/safety";
+export async function getInboxPayload() {
+  const emails = await listInboxEmails(),
+    db = getSqlite();
+  const preferences = db
+    .prepare("SELECT item_id, signal FROM reader_preferences")
+    .all() as Array<{ item_id: number; signal: string }>;
+  const navigation = db
+    .prepare("SELECT * FROM item_navigation")
+    .all() as Array<{
+    item_id: number;
+    category_id: string;
+    category_label: string;
+    tab_id: string;
+    tab_label: string;
+  }>;
+  const preferencesByItem = new Map(
+    preferences.map((p) => [p.item_id, p.signal]),
   );
-
-  return results;
-}
-
-async function classifyParsedEmail(
-  parsed: ParsedDigestEmail,
-  appConfig: AppConfigRecord,
-  services: InboxServices,
-) {
-  const prompt = normalizeInterestPrompt(appConfig.interestPrompt);
-  if (!prompt) {
-    return parsed;
-  }
-
-  const classifiedItems = await mapWithConcurrency(
-    parsed.items,
-    INTEREST_CLASSIFICATION_CONCURRENCY,
-    async (item) => {
-      const classification = await services.interestClassifier.classifyLink(
-        {
-          itemId: 0,
-          emailId: 0,
-          emailReceivedAt: parsed.receivedAt,
-          sourceVariant: parsed.sourceVariant,
-          emailSubject: parsed.subject,
-          senderName: parsed.senderName,
-          senderEmail: parsed.senderEmail,
-          section: item.section,
-          position: item.position,
-          title: item.title,
-          summary: item.summary,
-          readTimeText: item.readTimeText,
-          itemKind: item.itemKind,
-          trackedUrl: item.trackedUrl,
-          canonicalUrl: item.canonicalUrl,
-          finalUrl: item.finalUrl,
-        },
-        appConfig,
-        {
-          model: OPENAI_MODEL,
-        },
-      );
-
-      return {
-        ...item,
-        interest: classification,
-      };
-    },
-  );
-
+  const navigationByItem = Map.groupBy(navigation, (n) => n.item_id);
   return {
-    ...parsed,
-    items: classifiedItems,
+    navigation: navigationConfig,
+    emails: emails.map((email) => ({
+      id: email.id,
+      subject: email.subject,
+      sourceVariant: email.sourceVariant,
+      receivedAt: email.receivedAt,
+      items: email.items.map((item) => ({
+        id: item.id,
+        title: item.title,
+        summary: item.summary,
+        section: item.section,
+        readTimeText: item.readTimeText,
+        itemKind: item.itemKind,
+        resolvedAt: item.resolvedAt,
+        safeUrl: safeExternalUrl(
+          item.finalUrl ?? item.canonicalUrl ?? item.trackedUrl,
+        ),
+        preference: preferencesByItem.get(item.id) ?? null,
+        collections: (() => {
+          const stored = (navigationByItem.get(item.id) ?? []).map((n) => ({
+            categoryId: n.category_id,
+            categoryLabel: n.category_label,
+            tabId: n.tab_id,
+            tabLabel: n.tab_label,
+          }));
+          const defaults = defaultCollections(
+            email.provider === "gmail" && /^tldr$/i.test(email.sourceFamily)
+              ? "tldr"
+              : email.sourceFamily,
+          );
+          if (
+            /^tldr(?:-ai)?$/i.test(email.sourceFamily) &&
+            !stored.some((c) => c.categoryId === "ai" && c.tabId === "tldr")
+          )
+            return [...defaults, ...stored];
+          return stored.length
+            ? stored
+            : defaults.length
+              ? defaults
+              : [
+                  {
+                    categoryId: "unassigned",
+                    categoryLabel: "Unsorted",
+                    tabId: "all",
+                    tabLabel: "All reading",
+                  },
+                ];
+        })(),
+      })),
+    })),
   };
 }
-
-async function buildAiFeatureListForStoredItems(
-  appConfig: AppConfigRecord,
-  services: InboxServices,
-  options: {
-    includeResolvedItems: boolean;
-  },
-) {
-  const prompt = normalizeAiFeaturePrompt(appConfig.aiFeaturePrompt);
-  const storedInputs = await listItemInterestInputs({
-    includeResolved: options.includeResolvedItems,
-  });
-
-  if (!prompt) {
-    await clearItemAiFeatures();
-    return {
-      processedCount: 0,
-      totalCount: 0,
-    };
-  }
-
-  let processedCount = 0;
-  let progressUpdate = Promise.resolve();
-
-  await mapWithConcurrency(
-    storedInputs,
-    INTEREST_CLASSIFICATION_CONCURRENCY,
-    async (input) => {
-      const classification = await services.aiFeatureClassifier.classifyLink(
-        input,
-        appConfig,
-        {
-          model: OPENAI_MODEL,
-        },
-      );
-      await updateItemAiFeature(input.itemId, classification);
-
-      processedCount += 1;
-      const nextProcessedCount = processedCount;
-      progressUpdate = progressUpdate.then(() =>
-        setAiFeatureBuildState({
-          status: "running",
-          phase: "classifying",
-          message: `Analyzed link ${nextProcessedCount} of ${storedInputs.length} for the AI list.`,
-          discoveredItems: storedInputs.length,
-          processedItems: nextProcessedCount,
-          active: true,
-          includeResolvedItems: options.includeResolvedItems,
-        }),
-      );
-      await progressUpdate;
-    },
-  );
-
-  await progressUpdate;
-
-  return {
-    processedCount,
-    totalCount: storedInputs.length,
-  };
-}
-
-async function syncCompletedEmailReadState(
-  emailId: number,
-  services: InboxServices,
-) {
-  const email = await getEmailById(emailId);
-  if (!email || email.completionState !== "complete") {
-    return;
-  }
-
-  try {
-    await services.mailProvider.markMessageRead(email.providerMessageId);
-    await setEmailGmailSyncPending(email.id, false);
-  } catch {
-    await setEmailGmailSyncPending(email.id, true);
-  }
-
-  await refreshEmailCounts(email.id);
-}
-
-export async function getInboxPayload(services: Partial<InboxServices> = {}) {
-  const resolvedServices = resolveInboxServices(services);
-  const [rawEmails, sync, aiFeatureBuild, appConfig] = await Promise.all([
-    listInboxEmails(),
-    getSyncState(),
-    getAiFeatureBuildState(),
-    getAppConfig(),
-  ]);
-  const decorated = decorateInboxEmails(rawEmails, appConfig);
-  const shouldAutoSync = sync.active
-    ? false
-    : await shouldAutoSyncInbox(
-        sync.lastSuccessfulSyncStartedAt,
-        resolvedServices,
-      );
-
-  return {
-    emails: decorated.emails,
-    sync,
-    aiFeatureBuild,
-    shouldAutoSync,
-    appConfig: toInboxAppConfig(
-      appConfig,
-      decorated.interestRefreshPendingCount,
-      decorated.aiFeatureRefreshPendingCount,
-    ),
-  };
-}
-
-export async function updateInterestPrompt(prompt: string | null | undefined) {
-  const normalizedPrompt = normalizeInterestPrompt(prompt);
-  if (normalizedPrompt && !OPENAI_API_KEY) {
-    throw new Error(
-      "OPENAI_API_KEY must be configured before saving an interest prompt.",
-    );
-  }
-
-  await updateAppConfigPrompt(normalizedPrompt);
-  return getInboxPayload();
-}
-
-export async function updateAiFeaturePrompt(prompt: string | null | undefined) {
-  const normalizedPrompt = normalizeAiFeaturePrompt(prompt);
-  if (normalizedPrompt && !OPENAI_API_KEY) {
-    throw new Error(
-      "OPENAI_API_KEY must be configured before saving an AI feature prompt.",
-    );
-  }
-
-  await updateAppConfigAiFeaturePrompt(normalizedPrompt);
-  return getInboxPayload();
-}
-
-export async function syncInbox(
-  services: Partial<InboxServices> = {},
-  options: SyncInboxOptions = {},
-) {
-  if (syncPromise) {
-    return syncPromise;
-  }
-
-  syncPromise = (async () => {
-    const resolvedServices = resolveInboxServices(services);
-    const syncStartedAt = nowTs();
-    const [currentSyncState, appConfig] = await Promise.all([
-      getSyncState(),
-      getAppConfig(),
-    ]);
-    const forceFullResync = options.forceFullResync === true;
-    const includeResolvedItemsInRecheck =
-      forceFullResync && options.includeResolvedItemsInRecheck === true;
-    const incrementalCutoff = forceFullResync
-      ? null
-      : currentSyncState.lastSuccessfulSyncStartedAt;
-
-    await setSyncState({
-      status: "running",
-      phase: "listing",
-      message:
-        incrementalCutoff == null
-          ? forceFullResync
-            ? "Running full inbox reclassification and unread newsletter sync…"
-            : "Fetching unread TLDR newsletters from Gmail…"
-          : "Fetching unread TLDR newsletters added since the last successful sync…",
-      discoveredEmails: 0,
-      processedEmails: 0,
-      active: true,
-      lastStartedAt: syncStartedAt,
-      lastError: null,
-    });
-
-    try {
-      if (forceFullResync) {
-        const storedInputs = await listItemInterestInputs({
-          includeResolved: includeResolvedItemsInRecheck,
-        });
-        if (storedInputs.length > 0) {
-          await setSyncState({
-            status: "running",
-            phase: "classifying",
-            message: `Reclassifying ${storedInputs.length} ${includeResolvedItemsInRecheck ? "stored" : "unresolved"} link${storedInputs.length === 1 ? "" : "s"} with the current prompt…`,
-            discoveredEmails: storedInputs.length,
-            processedEmails: 0,
-            active: true,
-          });
-
-          const prompt = normalizeInterestPrompt(appConfig.interestPrompt);
-          if (!prompt) {
-            await clearItemInterests();
-          } else {
-            let processedCount = 0;
-            let progressUpdate = Promise.resolve();
-
-            await mapWithConcurrency(
-              storedInputs,
-              INTEREST_CLASSIFICATION_CONCURRENCY,
-              async (input) => {
-                const classification =
-                  await resolvedServices.interestClassifier.classifyLink(
-                    input,
-                    appConfig,
-                    {
-                      model: OPENAI_MODEL,
-                    },
-                  );
-                await updateItemInterest(input.itemId, classification);
-
-                processedCount += 1;
-                const nextProcessedCount = processedCount;
-                progressUpdate = progressUpdate.then(() =>
-                  setSyncState({
-                    status: "running",
-                    phase: "classifying",
-                    message: `Reclassified link ${nextProcessedCount} of ${storedInputs.length}.`,
-                    discoveredEmails: storedInputs.length,
-                    processedEmails: nextProcessedCount,
-                    active: true,
-                  }),
-                );
-                await progressUpdate;
-              },
-            );
-
-            await progressUpdate;
-          }
-
-          if (!prompt) {
-            await setSyncState({
-              status: "running",
-              phase: "classifying",
-              message:
-                "Cleared stored interest classifications because no prompt is configured.",
-              discoveredEmails: storedInputs.length,
-              processedEmails: storedInputs.length,
-              active: true,
-            });
-          }
-        } else if (!normalizeInterestPrompt(appConfig.interestPrompt)) {
-          await clearItemInterests();
-        }
-      }
-
-      const refs = await resolvedServices.mailProvider.listUnreadCandidates({
-        afterTs: incrementalCutoff,
-      });
-
-      await setSyncState({
-        status: "running",
-        phase: "fetching",
-        message:
-          refs.length === 0
-            ? incrementalCutoff == null
-              ? "No unread candidate newsletters found."
-              : "No new unread candidate newsletters found since the last successful sync."
-            : `Found ${refs.length} unread candidate newsletter${refs.length === 1 ? "" : "s"}. Loading message bodies…`,
-        discoveredEmails: refs.length,
-        processedEmails: 0,
-        active: true,
-      });
-
-      for (const [index, ref] of refs.entries()) {
-        const message = await resolvedServices.mailProvider.getMessage(ref.id);
-        const source = pickDigestSource(message);
-
-        if (!source) {
-          await setSyncState({
-            status: "running",
-            phase: "parsing",
-            message: `Skipping unsupported message ${index + 1} of ${refs.length}.`,
-            discoveredEmails: refs.length,
-            processedEmails: index + 1,
-            active: true,
-          });
-          continue;
-        }
-
-        const parsed = await classifyParsedEmail(
-          source.parse(message),
-          appConfig,
-          resolvedServices,
-        );
-        await upsertParsedEmail(parsed, {
-          preserveResolvedItemInterests: !includeResolvedItemsInRecheck,
-        });
-
-        await setSyncState({
-          status: "running",
-          phase: "persisting",
-          message: `Parsed ${parsed.sourceVariant} issue ${index + 1} of ${refs.length}.`,
-          discoveredEmails: refs.length,
-          processedEmails: index + 1,
-          active: true,
-        });
-      }
-
-      const emails = await listInboxEmails();
-      const pendingReadSync = emails.filter(
-        (email) =>
-          email.completionState === "complete" && email.gmailSyncPending,
-      );
-
-      if (pendingReadSync.length > 0) {
-        await setSyncState({
-          status: "running",
-          phase: "gmail",
-          message: `Retrying Gmail read-state sync for ${pendingReadSync.length} completed email(s)…`,
-          discoveredEmails: refs.length,
-          processedEmails: refs.length,
-          active: true,
-        });
-      }
-
-      for (const email of pendingReadSync) {
-        await syncCompletedEmailReadState(email.id, resolvedServices);
-      }
-
-      await setSyncState({
-        status: "idle",
-        phase: "ready",
-        message:
-          refs.length === 0
-            ? incrementalCutoff == null
-              ? "No unread TLDR newsletters found."
-              : "Inbox ready. No new unread TLDR newsletters needed syncing."
-            : `Inbox ready. Processed ${refs.length} unread newsletter(s).`,
-        discoveredEmails: refs.length,
-        processedEmails: refs.length,
-        active: false,
-        lastFinishedAt: nowTs(),
-        lastSuccessfulSyncStartedAt: syncStartedAt,
-      });
-    } catch (error) {
-      await setSyncState({
-        status: "error",
-        phase: "failed",
-        message: "Sync failed. Review the latest error and retry.",
-        active: false,
-        lastFinishedAt: nowTs(),
-        lastError:
-          error instanceof Error ? error.message : "Unknown sync error",
-      });
-      throw error;
-    } finally {
-      syncPromise = null;
-    }
-  })();
-
-  return syncPromise;
-}
-
-export async function buildAiFeatureList(
-  services: Partial<InboxServices> = {},
-  options: {
-    includeResolvedItems?: boolean;
-  } = {},
-) {
-  if (aiFeatureBuildPromise) {
-    return getInboxPayload(resolveInboxServices(services));
-  }
-
-  const resolvedServices = resolveInboxServices(services);
-  const appConfig = await getAppConfig();
-  const prompt = normalizeAiFeaturePrompt(appConfig.aiFeaturePrompt);
-  const includeResolvedItems = options.includeResolvedItems === true;
-
-  if (!prompt) {
-    throw new Error("Set an AI feature prompt before building the list.");
-  }
-
-  if (!OPENAI_API_KEY) {
-    throw new Error(
-      "OPENAI_API_KEY must be configured before building the AI feature list.",
-    );
-  }
-
-  const startedAt = nowTs();
-  await setAiFeatureBuildState({
-    status: "running",
-    phase: "listing",
-    message: includeResolvedItems
-      ? "Preparing the AI feature list from active and resolved links…"
-      : "Preparing the AI feature list from active links…",
-    discoveredItems: 0,
-    processedItems: 0,
-    active: true,
-    includeResolvedItems,
-    lastStartedAt: startedAt,
-    lastFinishedAt: null,
-    lastError: null,
-  });
-
-  aiFeatureBuildPromise = (async () => {
-    try {
-      const { processedCount, totalCount } =
-        await buildAiFeatureListForStoredItems(appConfig, resolvedServices, {
-          includeResolvedItems,
-        });
-
-      await setAiFeatureBuildState({
-        status: "idle",
-        phase: "ready",
-        message:
-          totalCount === 0
-            ? "AI feature list ready. No links matched the current scope."
-            : `AI feature list ready. Analyzed ${processedCount} link${processedCount === 1 ? "" : "s"}.`,
-        discoveredItems: totalCount,
-        processedItems: processedCount,
-        active: false,
-        includeResolvedItems,
-        lastFinishedAt: nowTs(),
-        lastError: null,
-      });
-    } catch (error) {
-      await setAiFeatureBuildState({
-        status: "error",
-        phase: "failed",
-        message:
-          "AI feature list build failed. Review the latest error and retry.",
-        active: false,
-        includeResolvedItems,
-        lastFinishedAt: nowTs(),
-        lastError:
-          error instanceof Error
-            ? error.message
-            : "Unknown AI list build error",
-      });
-    } finally {
-      aiFeatureBuildPromise = null;
-    }
-  })();
-
-  return getInboxPayload(resolvedServices);
-}
-
-export async function openItem(itemId: number) {
-  const item = await getItemById(itemId);
-  if (!item) {
-    throw new Error("Item not found.");
-  }
-
-  const sourceUrl = item.finalUrl ?? item.canonicalUrl ?? item.trackedUrl;
-  const bestKnownUrlKey = canonicalizeUrl(sourceUrl);
-  const existing = await getSnapshotByUrlKey(bestKnownUrlKey);
-
-  if (existing?.status === "ready") {
-    return {
-      snapshot: existing,
-      item,
-    };
-  }
-
-  await upsertSnapshot(bestKnownUrlKey, {
-    status: "fetching",
-    sourceUrl,
-    finalUrl: sourceUrl,
-  });
-
-  try {
-    const readable = await fetchReadableSnapshot(sourceUrl);
-    const snapshot =
-      (await getSnapshotByUrlKey(readable.urlKey)) ??
-      (await upsertSnapshot(readable.urlKey, {
-        status: "ready",
-        sourceUrl: readable.sourceUrl,
-        finalUrl: readable.finalUrl,
-        title: readable.title,
-        byline: readable.byline,
-        siteName: readable.siteName,
-        excerpt: readable.excerpt,
-        contentHtml: readable.contentHtml,
-        contentText: readable.contentText,
-        fetchedAt: nowTs(),
-      }));
-
-    await updateItemUrls(itemId, {
-      canonicalUrl: readable.urlKey,
-      finalUrl: readable.finalUrl,
-    });
-
-    return {
-      snapshot:
-        snapshot ??
-        (await upsertSnapshot(readable.urlKey, {
-          status: "ready",
-          sourceUrl: readable.sourceUrl,
-          finalUrl: readable.finalUrl,
-          title: readable.title,
-          byline: readable.byline,
-          siteName: readable.siteName,
-          excerpt: readable.excerpt,
-          contentHtml: readable.contentHtml,
-          contentText: readable.contentText,
-          fetchedAt: nowTs(),
-        })),
-      item: {
-        ...item,
-        canonicalUrl: readable.urlKey,
-        finalUrl: readable.finalUrl,
-      },
-    };
-  } catch (error) {
-    const failedSnapshot = await upsertSnapshot(bestKnownUrlKey, {
-      status: "failed",
-      sourceUrl,
-      finalUrl: sourceUrl,
-      errorMessage:
-        error instanceof Error ? error.message : "Failed to fetch article",
-    });
-
-    return {
-      snapshot: failedSnapshot ?? null,
-      item,
-    };
-  }
-}
-
 export async function recordLinkOpen(
   itemId: number,
   metadata: ItemInteractionMetadata = {},
 ) {
-  await recordItemInteraction(itemId, "link_open", metadata);
-  return {
-    ok: true,
-  };
+  recordItemInteraction(itemId, "link_open", metadata);
+  return { ok: true };
 }
-
 export async function recordDescriptionExpand(
   itemId: number,
   metadata: ItemInteractionMetadata = {},
 ) {
-  await recordItemInteraction(itemId, "description_expand", metadata);
-  return {
-    ok: true,
-  };
+  recordItemInteraction(itemId, "description_expand", metadata);
+  return { ok: true };
 }
-
+export async function openItem(itemId: number) {
+  recordItemInteraction(itemId, "reader_open");
+  return { ok: true };
+}
+function transition(
+  itemId: number,
+  resolved: boolean,
+  metadata: ItemInteractionMetadata = {},
+) {
+  const db = getSqlite();
+  db.transaction(() => {
+    const row = db
+      .prepare("SELECT email_id, resolved_at FROM items WHERE id = ?")
+      .get(itemId) as
+      | { email_id: number; resolved_at: number | null }
+      | undefined;
+    if (!row) throw new Error("Item not found");
+    if ((row.resolved_at != null) === resolved) return;
+    const now = Date.now();
+    db.prepare(
+      "UPDATE items SET resolved_at = ?, updated_at = ? WHERE id = ?",
+    ).run(resolved ? now : null, now, itemId);
+    recordItemInteraction(itemId, resolved ? "resolve" : "unresolve", metadata);
+    db.prepare(
+      `UPDATE emails SET resolved_items = (SELECT COUNT(*) FROM items WHERE email_id = ? AND resolved_at IS NOT NULL), completion_state = CASE WHEN NOT EXISTS (SELECT 1 FROM items WHERE email_id = ? AND resolved_at IS NULL) THEN 'complete' ELSE 'active' END, updated_at = ? WHERE id = ?`,
+    ).run(row.email_id, row.email_id, now, row.email_id);
+  }).immediate();
+}
 export async function resolveItem(
   itemId: number,
-  services: Partial<InboxServices> = {},
   metadata: ItemInteractionMetadata = {},
 ) {
-  const resolvedServices = resolveInboxServices(services);
-  const item = await getItemById(itemId);
-  if (!item) {
-    throw new Error("Item not found.");
-  }
-
-  const result = await markItemResolved(itemId);
-  await recordItemInteraction(itemId, "resolve", metadata);
-
-  if (result.complete) {
-    await syncCompletedEmailReadState(item.emailId, resolvedServices);
-  }
-
-  return listVisibleInboxEmails();
+  transition(itemId, true, metadata);
+  return (await getInboxPayload()).emails;
 }
-
-export async function resolveNonInterestingItems(
-  keepRecentDays: number,
-  services: Partial<InboxServices> = {},
-  options: {
-    excludeAiListItems?: boolean;
-  } = {},
-  metadata: ItemInteractionMetadata = {},
-) {
-  const resolvedServices = resolveInboxServices(services);
-  if (!Number.isFinite(keepRecentDays) || keepRecentDays < 0) {
-    throw new Error("Keep recent days must be a non-negative number.");
-  }
-
-  const appConfig = await getAppConfig();
-  const prompt = normalizeInterestPrompt(appConfig.interestPrompt);
-  if (!prompt) {
-    throw new Error("Set an interest prompt before bulk resolving links.");
-  }
-
-  const receivedBeforeTs = nowTs() - Math.floor(keepRecentDays) * 86_400_000;
-  const candidates = await listNonInterestingBulkResolveCandidates({
-    promptVersion: appConfig.interestPromptVersion,
-    receivedBeforeTs,
-    excludeAiListItems: options.excludeAiListItems === true,
-  });
-
-  let resolvedCount = 0;
-
-  for (const candidate of candidates) {
-    const item = await getItemById(candidate.itemId);
-    if (!item || item.resolvedAt != null) {
-      continue;
-    }
-
-    const result = await markItemResolved(candidate.itemId);
-    await recordItemInteraction(candidate.itemId, "resolve", {
-      ...metadata,
-      bulkResolveMode: "not_interesting",
-      excludeAiListItems: options.excludeAiListItems === true,
-      keepRecentDays: Math.floor(keepRecentDays),
-    });
-    resolvedCount += 1;
-
-    if (result.complete) {
-      await syncCompletedEmailReadState(candidate.emailId, resolvedServices);
-    }
-  }
-
-  return {
-    emails: await listVisibleInboxEmails(),
-    resolvedCount,
-  };
-}
-
 export async function unresolveItem(itemId: number) {
-  const item = await getItemById(itemId);
-  if (!item) {
-    throw new Error("Item not found.");
-  }
-
-  await markItemUnresolved(itemId);
-  await recordItemInteraction(itemId, "unresolve");
-  return listVisibleInboxEmails();
+  transition(itemId, false);
+  return (await getInboxPayload()).emails;
+}
+export async function setPreference(
+  itemId: number,
+  signal: "interested" | "less_like_this" | "clear",
+) {
+  const db = getSqlite();
+  db.transaction(() => {
+    const current = db
+      .prepare("SELECT signal FROM reader_preferences WHERE item_id = ?")
+      .get(itemId) as { signal: string } | undefined;
+    if (current?.signal === signal) return;
+    recordItemInteraction(itemId, "preference", { signal });
+    db.prepare(
+      "INSERT INTO reader_preferences VALUES (?, ?, ?) ON CONFLICT(item_id) DO UPDATE SET signal = excluded.signal, updated_at = excluded.updated_at",
+    ).run(itemId, signal, Date.now());
+  }).immediate();
+  return { ok: true };
 }

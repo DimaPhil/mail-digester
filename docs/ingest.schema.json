@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "source": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "allOf": [
+            {
+              "pattern": "^[a-zA-Z0-9@._:+/-]+$"
+            },
+            {
+              "pattern": "^[a-z0-9][a-z0-9_-]*$"
+            }
+          ]
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        }
+      },
+      "required": ["id", "label"],
+      "additionalProperties": false
+    },
+    "message": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "^[a-zA-Z0-9@._:+/-]+$"
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "receivedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "senderName": {
+          "default": "",
+          "type": "string",
+          "maxLength": 200
+        },
+        "origin": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "gmail"
+            },
+            "messageId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "^[a-zA-Z0-9@._:+/-]+$"
+            }
+          },
+          "required": ["provider", "messageId"],
+          "additionalProperties": false
+        },
+        "senderEmail": {
+          "default": "",
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "email",
+              "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+            },
+            {
+              "type": "string",
+              "const": ""
+            }
+          ]
+        },
+        "description": {
+          "default": "",
+          "type": "string",
+          "maxLength": 2000
+        }
+      },
+      "required": ["id", "subject", "receivedAt"],
+      "additionalProperties": false
+    },
+    "items": {
+      "minItems": 1,
+      "maxItems": 200,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "^[a-zA-Z0-9@._:+/-]+$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "description": {
+            "default": "",
+            "type": "string",
+            "maxLength": 20000
+          },
+          "url": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "legacyItemId": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991
+          },
+          "section": {
+            "default": "Reading",
+            "type": "string",
+            "maxLength": 100
+          },
+          "readTime": {
+            "type": "string",
+            "maxLength": 50
+          },
+          "kind": {
+            "default": "editorial",
+            "type": "string",
+            "enum": ["editorial", "sponsor", "discussion", "other"]
+          },
+          "collections": {
+            "default": [],
+            "maxItems": 10,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "categoryId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200,
+                  "pattern": "^[a-zA-Z0-9@._:+/-]+$"
+                },
+                "categoryLabel": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "tabId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200,
+                  "pattern": "^[a-zA-Z0-9@._:+/-]+$"
+                },
+                "tabLabel": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                }
+              },
+              "required": ["categoryId", "categoryLabel", "tabId", "tabLabel"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["id", "title"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["source", "message", "items"],
+  "additionalProperties": false
+}

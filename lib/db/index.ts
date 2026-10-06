@@ -20,6 +20,8 @@ function createDatabase() {
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
   const sqlite = new Database(DB_PATH);
   sqlite.pragma("journal_mode = WAL");
+  sqlite.pragma("foreign_keys = ON");
+  sqlite.pragma("busy_timeout = 5000");
   const orm = drizzle(sqlite, { schema });
 
   return {
@@ -37,13 +39,9 @@ function getInstance() {
   return globalThis.__mailDigesterDb;
 }
 
-function initializeSchema() {
-  const instance = getInstance();
-  if (instance.initialized) {
-    return;
-  }
-
-  instance.sqlite.exec(`
+export function migrateDatabase(sqlite: Database.Database) {
+  sqlite.transaction(() => {
+    sqlite.exec(`
     CREATE TABLE IF NOT EXISTS emails (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       provider TEXT NOT NULL,
@@ -97,12 +95,6 @@ function initializeSchema() {
 
     CREATE UNIQUE INDEX IF NOT EXISTS items_email_source_item_idx
     ON items(email_id, source_item_id);
-
-    CREATE INDEX IF NOT EXISTS items_interest_status_idx
-    ON items(interest_status, resolved_at, interest_prompt_version);
-
-    CREATE INDEX IF NOT EXISTS items_ai_feature_status_idx
-    ON items(ai_feature_status, resolved_at, ai_feature_prompt_version);
 
     CREATE TABLE IF NOT EXISTS article_snapshots (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -197,109 +189,152 @@ function initializeSchema() {
     );
   `);
 
-  const itemColumns = instance.sqlite
-    .prepare("PRAGMA table_info(items)")
-    .all() as Array<{ name: string }>;
-  const itemColumnDefinitions = [
-    ["interest_status", "TEXT NOT NULL DEFAULT 'unclassified'"],
-    ["interest_reason", "TEXT"],
-    ["interest_model", "TEXT"],
-    ["interest_prompt_version", "INTEGER"],
-    ["interest_classified_at", "INTEGER"],
-    ["ai_feature_status", "TEXT NOT NULL DEFAULT 'unclassified'"],
-    ["ai_feature_reason", "TEXT"],
-    ["ai_feature_model", "TEXT"],
-    ["ai_feature_prompt_version", "INTEGER"],
-    ["ai_feature_classified_at", "INTEGER"],
-  ] as const;
+    const itemColumns = sqlite
+      .prepare("PRAGMA table_info(items)")
+      .all() as Array<{ name: string }>;
+    const itemColumnDefinitions = [
+      ["interest_status", "TEXT NOT NULL DEFAULT 'unclassified'"],
+      ["interest_reason", "TEXT"],
+      ["interest_model", "TEXT"],
+      ["interest_prompt_version", "INTEGER"],
+      ["interest_classified_at", "INTEGER"],
+      ["ai_feature_status", "TEXT NOT NULL DEFAULT 'unclassified'"],
+      ["ai_feature_reason", "TEXT"],
+      ["ai_feature_model", "TEXT"],
+      ["ai_feature_prompt_version", "INTEGER"],
+      ["ai_feature_classified_at", "INTEGER"],
+    ] as const;
 
-  for (const [name, definition] of itemColumnDefinitions) {
-    const hasColumn = itemColumns.some((column) => column.name === name);
-    if (!hasColumn) {
-      instance.sqlite.exec(`
+    for (const [name, definition] of itemColumnDefinitions) {
+      const hasColumn = itemColumns.some((column) => column.name === name);
+      if (!hasColumn) {
+        sqlite.exec(`
         ALTER TABLE items
         ADD COLUMN ${name} ${definition}
       `);
+      }
     }
-  }
 
-  instance.sqlite.exec(`
+    sqlite.exec(`
     CREATE INDEX IF NOT EXISTS items_interest_status_idx
     ON items(interest_status, resolved_at, interest_prompt_version)
   `);
-  instance.sqlite.exec(`
+    sqlite.exec(`
     CREATE INDEX IF NOT EXISTS items_ai_feature_status_idx
     ON items(ai_feature_status, resolved_at, ai_feature_prompt_version)
   `);
 
-  const syncStateColumns = instance.sqlite
-    .prepare("PRAGMA table_info(sync_state)")
-    .all() as Array<{ name: string }>;
-  const hasLastSuccessfulSyncStartedAt = syncStateColumns.some(
-    (column) => column.name === "last_successful_sync_started_at",
-  );
+    const syncStateColumns = sqlite
+      .prepare("PRAGMA table_info(sync_state)")
+      .all() as Array<{ name: string }>;
+    const hasLastSuccessfulSyncStartedAt = syncStateColumns.some(
+      (column) => column.name === "last_successful_sync_started_at",
+    );
 
-  if (!hasLastSuccessfulSyncStartedAt) {
-    instance.sqlite.exec(`
+    if (!hasLastSuccessfulSyncStartedAt) {
+      sqlite.exec(`
       ALTER TABLE sync_state
       ADD COLUMN last_successful_sync_started_at INTEGER
     `);
-  }
+    }
 
-  const appConfigColumns = instance.sqlite
-    .prepare("PRAGMA table_info(app_config)")
-    .all() as Array<{ name: string }>;
-  const appConfigColumnDefinitions = [
-    ["ai_feature_prompt", "TEXT"],
-    ["ai_feature_prompt_version", "INTEGER NOT NULL DEFAULT 0"],
-  ] as const;
+    const appConfigColumns = sqlite
+      .prepare("PRAGMA table_info(app_config)")
+      .all() as Array<{ name: string }>;
+    const appConfigColumnDefinitions = [
+      ["ai_feature_prompt", "TEXT"],
+      ["ai_feature_prompt_version", "INTEGER NOT NULL DEFAULT 0"],
+    ] as const;
 
-  for (const [name, definition] of appConfigColumnDefinitions) {
-    const hasColumn = appConfigColumns.some((column) => column.name === name);
-    if (!hasColumn) {
-      instance.sqlite.exec(`
+    for (const [name, definition] of appConfigColumnDefinitions) {
+      const hasColumn = appConfigColumns.some((column) => column.name === name);
+      if (!hasColumn) {
+        sqlite.exec(`
         ALTER TABLE app_config
         ADD COLUMN ${name} ${definition}
       `);
+      }
     }
-  }
 
-  instance.sqlite
-    .prepare(
-      `
+    sqlite
+      .prepare(
+        `
       INSERT OR IGNORE INTO sync_state (
         id, status, phase, message, discovered_emails, processed_emails, active, updated_at
       ) VALUES (
         1, 'idle', 'ready', 'Ready to sync unread TLDR mail.', 0, 0, 0, ?
       )
     `,
-    )
-    .run(nowTs());
+      )
+      .run(nowTs());
 
-  instance.sqlite
-    .prepare(
-      `
+    sqlite
+      .prepare(
+        `
       INSERT OR IGNORE INTO ai_feature_build_state (
         id, status, phase, message, discovered_items, processed_items, active, include_resolved_items, updated_at
       ) VALUES (
         1, 'idle', 'ready', 'Ready to build the AI feature list.', 0, 0, 0, 0, ?
       )
     `,
-    )
-    .run(nowTs());
+      )
+      .run(nowTs());
 
-  instance.sqlite
-    .prepare(
-      `
+    sqlite
+      .prepare(
+        `
       INSERT OR IGNORE INTO app_config (
         id, interest_prompt, interest_prompt_version, ai_feature_prompt, ai_feature_prompt_version, created_at, updated_at
       ) VALUES (
         1, NULL, 0, NULL, 0, ?, ?
       )
     `,
-    )
-    .run(nowTs(), nowTs());
+      )
+      .run(nowTs(), nowTs());
 
+    const eventColumns = sqlite
+      .prepare("PRAGMA table_info(item_interactions)")
+      .all() as Array<{ name: string }>;
+    if (!eventColumns.some((c) => c.name === "actor"))
+      sqlite.exec(
+        "ALTER TABLE item_interactions ADD COLUMN actor TEXT NOT NULL DEFAULT 'unknown'",
+      );
+    sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS ingestion_sources (
+      source_id TEXT PRIMARY KEY, label TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS ingestion_messages (
+      source_id TEXT NOT NULL REFERENCES ingestion_sources(source_id),
+      message_id TEXT NOT NULL,
+      email_id INTEGER NOT NULL UNIQUE REFERENCES emails(id),
+      metadata_hash TEXT NOT NULL,
+      PRIMARY KEY(source_id, message_id)
+    );
+    CREATE TABLE IF NOT EXISTS ingestion_items (
+      source_id TEXT NOT NULL, message_id TEXT NOT NULL, item_id TEXT NOT NULL,
+      internal_item_id INTEGER NOT NULL UNIQUE REFERENCES items(id),
+      content_hash TEXT NOT NULL,
+      PRIMARY KEY(source_id, message_id, item_id),
+      FOREIGN KEY(source_id, message_id) REFERENCES ingestion_messages(source_id, message_id)
+    );
+    CREATE TABLE IF NOT EXISTS item_navigation (
+      item_id INTEGER NOT NULL REFERENCES items(id),
+      category_id TEXT NOT NULL, category_label TEXT NOT NULL,
+      tab_id TEXT NOT NULL, tab_label TEXT NOT NULL,
+      PRIMARY KEY(item_id, category_id, tab_id)
+    );
+    CREATE TABLE IF NOT EXISTS reader_preferences (
+      item_id INTEGER PRIMARY KEY REFERENCES items(id), signal TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  `);
+  })();
+}
+
+function initializeSchema() {
+  const instance = getInstance();
+  if (instance.initialized) return;
+  migrateDatabase(instance.sqlite);
   instance.initialized = true;
 }
 

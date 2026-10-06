@@ -9,11 +9,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: ["lib/**/*.ts"],
-      exclude: [
-        "lib/mail/providers/gmail-gws.ts",
-        "lib/db/index.ts",
-        "lib/db/schema.ts",
-      ],
+      exclude: ["lib/db/index.ts", "lib/db/schema.ts"],
       thresholds: {
         lines: 80,
         functions: 80,

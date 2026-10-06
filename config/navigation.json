@@ -1,0 +1,53 @@
+[
+  {
+    "id": "ai",
+    "label": "AI",
+    "tabs": [
+      {
+        "id": "tldr",
+        "label": "TLDR"
+      },
+      {
+        "id": "research",
+        "label": "News & Research"
+      },
+      {
+        "id": "agents-tools",
+        "label": "Agents & Tools"
+      }
+    ]
+  },
+  {
+    "id": "engineering",
+    "label": "Engineering",
+    "tabs": [
+      {
+        "id": "systems-code",
+        "label": "Systems & Code"
+      },
+      {
+        "id": "cloud-data",
+        "label": "Cloud & Data"
+      }
+    ]
+  },
+  {
+    "id": "markets",
+    "label": "Markets",
+    "tabs": [
+      {
+        "id": "crypto",
+        "label": "Crypto"
+      },
+      {
+        "id": "macro",
+        "label": "Macro"
+      }
+    ]
+  },
+  {
+    "id": "business",
+    "label": "Business",
+    "tabs": []
+  }
+]

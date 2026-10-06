@@ -1,429 +1,381 @@
-import { expect, test } from "@playwright/test";
-
-test.describe.configure({ mode: "serial" });
-
-test("shows emails on the left and opens the selected email detail", async ({
-  page,
-}) => {
-  await page.goto("/");
-  const olderEmail = page.getByRole("button", {
-    name: /Compute race .* NASA systems .* programming hunches/i,
-  });
-  const newerEmail = page.getByRole("button", {
-    name: /OpenAI roadmap .* Claude control panels .* new eval tooling/i,
-  });
-
-  await expect(olderEmail).toBeVisible({ timeout: 20_000 });
-  await expect(newerEmail).toBeVisible({ timeout: 20_000 });
-
-  const olderBox = await olderEmail.boundingBox();
-  const newerBox = await newerEmail.boundingBox();
-
-  expect(olderBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(
-    newerBox?.y ?? Number.POSITIVE_INFINITY,
-  );
-
-  await expect(olderEmail).toBeVisible({ timeout: 20_000 });
-
-  await newerEmail.click();
-
-  await expect(
-    page.locator("header").getByRole("heading", {
-      name: /OpenAI roadmap .* Claude control panels .* new eval tooling/i,
-    }),
-  ).toBeVisible({ timeout: 20_000 });
-  await expect(
-    page.getByRole("link", {
-      name: /OpenAI sharpens its enterprise roadmap \(3 minute read\)/i,
-    }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: /Show full description/i }),
-  ).toBeVisible();
-  await expect(page.getByText(/broader launch/i)).toHaveCount(0);
-  await page.getByRole("button", { name: /Show full description/i }).click();
-  await expect(page.getByText(/broader launch/i)).toBeVisible();
-  await expect(page.getByText(/Open link/i).first()).toBeVisible();
-});
-
-test("supports sorting emails newest-first while keeping oldest-first as the default", async ({
-  page,
-}) => {
-  await page.goto("/");
-
-  const olderEmail = page.getByRole("button", {
-    name: /Compute race .* NASA systems .* programming hunches/i,
-  });
-  const newerEmail = page.getByRole("button", {
-    name: /OpenAI roadmap .* Claude control panels .* new eval tooling/i,
-  });
-
-  await expect(olderEmail).toBeVisible({ timeout: 20_000 });
-  await expect(newerEmail).toBeVisible({ timeout: 20_000 });
-
-  const defaultOlderBox = await olderEmail.boundingBox();
-  const defaultNewerBox = await newerEmail.boundingBox();
-
-  expect(defaultOlderBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(
-    defaultNewerBox?.y ?? Number.POSITIVE_INFINITY,
-  );
-
-  await page.getByRole("button", { name: /Newest first/i }).click();
-
-  const sortedOlderBox = await olderEmail.boundingBox();
-  const sortedNewerBox = await newerEmail.boundingBox();
-
-  expect(sortedNewerBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(
-    sortedOlderBox?.y ?? Number.POSITIVE_INFINITY,
-  );
-});
-
-test("supports a flat link view without requiring email selection", async ({
-  page,
-}) => {
-  await page.goto("/");
-
-  await page.getByRole("button", { name: /Flat links/i }).click();
-
-  await expect(
-    page.getByRole("link", {
-      name: /OpenAI sharpens its enterprise roadmap \(3 minute read\)/i,
-    }),
-  ).toBeVisible({ timeout: 20_000 });
-  await expect(
-    page.getByText(/One continuous queue of unresolved links/i),
-  ).toBeVisible();
-});
-
-test("saves an interest prompt and filters flat links by classification", async ({
-  page,
-}) => {
-  await page.goto("/");
-
-  await page
-    .getByPlaceholder(/Describe what kinds of links are interesting to you/i)
-    .fill("openai");
-  await page.getByRole("button", { name: /Save prompt/i }).click();
-  await expect(page.getByText(/Interest prompt saved/i)).toBeVisible();
-  await expect(page.getByText(/need recheck/i)).toBeVisible();
-
-  await page.getByLabel(/Force full resync/i).click();
-  await page
-    .getByRole("button", { name: /Resync and recheck unresolved links/i })
-    .click();
-  await expect(
-    page.getByRole("button", {
-      name: /Resync and recheck unresolved links/i,
-    }),
-  ).toBeVisible({
-    timeout: 20_000,
-  });
-
-  await page.getByRole("button", { name: /Flat links/i }).click();
-  await page
-    .getByRole("button", { name: /^Interesting$/i })
-    .first()
-    .click();
-
-  await expect(
-    page.getByRole("link", {
-      name: /OpenAI sharpens its enterprise roadmap \(3 minute read\)/i,
-    }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("link", {
-      name: /Amazon escalates the infrastructure race \(5 minute read\)/i,
-    }),
-  ).toHaveCount(0);
-
-  await page
-    .getByRole("button", { name: /^Not interesting$/i })
-    .first()
-    .click();
-  await expect(
-    page.getByRole("link", {
-      name: /Amazon escalates the infrastructure race \(5 minute read\)/i,
-    }),
-  ).toBeVisible();
-});
-
-test("builds a separate AI feature list and can include resolved links", async ({
-  page,
-}) => {
-  await page.goto("/");
-
-  await page
-    .getByPlaceholder(
-      /Describe which AI product capabilities should make it into the separate watchlist/i,
-    )
-    .fill("openai claude anthropic roadmap panels");
-  await page.getByRole("button", { name: /Save AI list prompt/i }).click();
-  await expect(page.getByText(/AI feature prompt saved/i)).toBeVisible();
-
-  await page.getByRole("button", { name: /Build AI feature list/i }).click();
-  await expect(
-    page.getByRole("button", { name: /AI list/i }).first(),
-  ).toBeVisible({ timeout: 20_000 });
-  await expect(
-    page.getByRole("link", {
-      name: /OpenAI sharpens its enterprise roadmap \(3 minute read\)/i,
-    }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("link", {
-      name: /Claude adds role-aware control panels \(4 minute read\)/i,
-    }),
-  ).toBeVisible();
-
-  await page
-    .getByRole("button", { name: /Email view/i })
-    .first()
-    .click();
-  await page
-    .getByRole("button", {
-      name: /OpenAI roadmap .* Claude control panels .* new eval tooling/i,
-    })
-    .click();
-  await page
-    .getByRole("checkbox", {
-      name: /Resolve OpenAI sharpens its enterprise roadmap/i,
-    })
-    .click();
-
-  await page
-    .getByRole("button", { name: /AI list/i })
-    .first()
-    .click();
-  await expect(
-    page.getByRole("link", {
-      name: /OpenAI sharpens its enterprise roadmap \(3 minute read\)/i,
-    }),
-  ).toHaveCount(0);
-
-  await page
-    .getByLabel(/Include resolved links/i)
-    .last()
-    .click();
-  await page.getByRole("button", { name: /Build AI feature list/i }).click();
-  await expect(
-    page.getByRole("link", {
-      name: /OpenAI sharpens its enterprise roadmap \(3 minute read\)/i,
-    }),
-  ).toBeVisible({ timeout: 20_000 });
-
-  await page.getByRole("button", { name: /Undo/i }).click();
-  await expect(
-    page.getByRole("link", {
-      name: /OpenAI sharpens its enterprise roadmap \(3 minute read\)/i,
-    }),
-  ).toBeVisible();
-});
-
-test("opens email detail as a mobile master-detail view", async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
-
-  const emailButton = page.getByRole("button", {
-    name: /OpenAI roadmap .* Claude control panels .* new eval tooling/i,
-  });
-
-  await expect(emailButton).toBeVisible({ timeout: 20_000 });
-  await expect(
-    page.getByRole("button", { name: /Back to emails/i }),
-  ).toHaveCount(0);
-
-  await emailButton.click();
-
-  await expect(
-    page.getByRole("button", { name: /Back to emails/i }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("link", {
-      name: /OpenAI sharpens its enterprise roadmap \(3 minute read\)/i,
-    }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: /Show full description/i }).click();
-  await expect(page.getByText(/broader launch/i)).toBeVisible();
-  await expect(emailButton).toHaveCount(0);
-
-  await page.getByRole("button", { name: /Back to emails/i }).click();
-
-  await expect(emailButton).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: /Back to emails/i }),
-  ).toHaveCount(0);
-});
-
-test("resolves an item and supports undo", async ({ page }) => {
-  await page.goto("/");
-
-  await expect(
-    page.getByRole("button", {
-      name: /Compute race .* NASA systems .* programming hunches/i,
-    }),
-  ).toBeVisible({ timeout: 20_000 });
-
-  await page
-    .getByRole("button", {
-      name: /Compute race .* NASA systems .* programming hunches/i,
-    })
-    .click();
-
-  const detailPanel = page.locator("section").filter({
-    has: page.getByText(/TOP STORIES/i),
-  });
-
-  await expect(
-    page.getByRole("link", {
-      name: /Amazon escalates the infrastructure race \(5 minute read\)/i,
-    }),
-  ).toBeVisible();
-
-  const resolveControl = detailPanel.getByRole("checkbox", {
-    name: /Resolve Amazon escalates the infrastructure race/i,
-  });
-
-  await resolveControl.click();
-  await expect(
-    page.getByText(/Resolved “Amazon escalates the infrastructure race/i),
-  ).toBeVisible();
-
-  await page.getByRole("button", { name: /Undo/i }).click();
-  await expect(
-    page.getByRole("link", {
-      name: /Amazon escalates the infrastructure race \(5 minute read\)/i,
-    }),
-  ).toBeVisible();
-});
-
-test("keeps a resolved item hidden during a stale inbox refresh", async ({
-  page,
-}) => {
-  await page.goto("/");
-
-  const initialInbox = await page.evaluate(async () => {
-    const response = await fetch("/api/inbox");
-    return response.json();
-  });
-
-  let staleInboxServed = false;
-  await page.route("**/api/inbox", async (route) => {
-    if (staleInboxServed) {
-      await route.continue();
-      return;
-    }
-
-    staleInboxServed = true;
-    await route.fulfill({
-      body: JSON.stringify(initialInbox),
-      contentType: "application/json",
-      status: 200,
+import { test, expect } from "@playwright/test";
+const ingestHeaders = { authorization: "Bearer synthetic-ingest-test-only" };
+const collection = (
+  categoryId: string,
+  categoryLabel: string,
+  tabId: string,
+  tabLabel: string,
+) => [{ categoryId, categoryLabel, tabId, tabLabel }];
+const fixtures = [
+  {
+    source: { id: "tldr", label: "TLDR" },
+    message: {
+      id: "synthetic-tldr",
+      subject: "Today's perspective",
+      receivedAt: "2026-10-03T08:00:00Z",
+    },
+    items: [
+      {
+        id: "story-1",
+        title: "The next chapter of intelligent software",
+        description:
+          "A new generation of tools is changing how teams build, test, and ship. This thoughtful overview looks beyond the headlines to the practices that make these systems useful in everyday work.",
+        url: "https://example.com/software",
+        section: "Ideas & perspectives",
+        readTime: "4 min read",
+        collections: collection("ai", "AI", "tldr", "TLDR"),
+      },
+      {
+        id: "synthetic-sponsor",
+        title: "Synthetic sponsored resource",
+        description: "A synthetic sponsor preserved for testing.",
+        url: "https://example.com/sponsor",
+        kind: "sponsor",
+        collections: collection("ai", "AI", "tldr", "TLDR"),
+      },
+      {
+        id: "story-2",
+        title: "Designing a calmer relationship with technology",
+        description:
+          "Small changes to our digital spaces can make room for deeper thought. A practical guide to choosing the signals that matter, and giving everything else a little less attention.",
+        url: "https://example.com/design",
+        section: "Deep dives",
+        readTime: "6 min read",
+        collections: collection("ai", "AI", "tldr", "TLDR"),
+      },
+    ],
+  },
+  {
+    source: { id: "tldr-ai", label: "TLDR AI" },
+    message: {
+      id: "synthetic-ai",
+      subject: "Models and methods",
+      receivedAt: "2026-10-02T08:00:00Z",
+    },
+    items: [
+      {
+        id: "story-3",
+        title: "What reliable AI looks like in practice",
+        description:
+          "The interesting work begins after the demo. Researchers share a measured approach to evaluations, feedback loops, and the details that help useful tools earn our trust.",
+        url: "https://example.com/ai",
+        section: "Research & applications",
+        readTime: "5 min read",
+        collections: collection("ai", "AI", "tldr", "TLDR"),
+      },
+    ],
+  },
+  {
+    source: { id: "research", label: "Research Notes" },
+    message: {
+      id: "synthetic-research",
+      subject: "New research",
+      receivedAt: "2026-10-01T08:00:00Z",
+    },
+    items: [
+      {
+        id: "paper",
+        title: "A field guide to learning systems",
+        description:
+          "How learning systems improve over time: a practical look at evaluation, iteration, and the research behind reliable feedback.\n\nPlain text <script>window.compromised=true</script> stays plain text.",
+        section: "Papers",
+        collections: collection("ai", "AI", "research", "News & Research"),
+      },
+    ],
+  },
+  {
+    source: { id: "systems", label: "Engineering Weekly" },
+    message: {
+      id: "synthetic-systems",
+      subject: "Systems notes",
+      receivedAt: "2026-10-01T08:00:00Z",
+    },
+    items: [
+      {
+        id: "systems",
+        title: "A practical guide to distributed systems",
+        description:
+          "Good foundations make complicated systems easier to reason about.",
+        url: "https://example.com/systems",
+        collections: [
+          ...collection(
+            "engineering",
+            "Engineering",
+            "systems-code",
+            "Systems & Code",
+          ),
+          ...collection("ai", "AI", "agents-tools", "Agents & Tools"),
+        ],
+      },
+    ],
+  },
+  {
+    source: { id: "markets", label: "Market Letter" },
+    message: {
+      id: "synthetic-markets",
+      subject: "Market briefing",
+      receivedAt: "2026-10-01T08:00:00Z",
+    },
+    items: [
+      {
+        id: "narrative",
+        title: "Signals from the macro landscape",
+        description:
+          "Interest rates, inflation, and market sentiment in one concise briefing. A wider view of the forces shaping the week.",
+        collections: collection("markets", "Markets", "crypto", "Crypto"),
+      },
+    ],
+  },
+];
+test.beforeAll(async ({ request }) => {
+  for (const data of fixtures) {
+    const response = await request.post("/api/v1/ingest", {
+      headers: ingestHeaders,
+      data,
     });
-  });
-
-  await page
-    .getByRole("button", {
-      name: /Compute race .* NASA systems .* programming hunches/i,
-    })
-    .click();
-
-  await page
-    .getByRole("checkbox", {
-      name: /Resolve Amazon escalates the infrastructure race/i,
-    })
-    .click();
-
-  await expect(
-    page.getByText(/Resolved “Amazon escalates the infrastructure race/i),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("link", {
-      name: /Amazon escalates the infrastructure race \(5 minute read\)/i,
-    }),
-  ).toHaveCount(0);
-
-  await page.getByRole("button", { name: /Undo/i }).click();
-  await expect(
-    page.getByRole("link", {
-      name: /Amazon escalates the infrastructure race \(5 minute read\)/i,
-    }),
-  ).toBeVisible();
+    expect([200, 201]).toContain(response.status());
+  }
 });
-
-test("moves a fully resolved email into the completed section", async ({
+test("desktop reader and mobile layouts show configured categories and combined TLDR editions", async ({
   page,
 }) => {
   await page.goto("/");
-
-  const emailButton = page.getByRole("button", {
-    name: /Compute race .* NASA systems .* programming hunches/i,
-  });
-  await expect(emailButton).toBeVisible({ timeout: 20_000 });
-  await emailButton.click();
-
-  for (const label of [
-    /Resolve Amazon escalates the infrastructure race/i,
-    /Resolve The full-stack developer platform to build real-time AI humans/i,
-    /Resolve What are your programming "hunches" you haven't yet investigated/i,
-  ]) {
-    await page.getByRole("checkbox", { name: label }).click();
-    await expect(page.getByRole("button", { name: /Undo/i })).toBeVisible();
-  }
-
-  const leftPanel = page.locator("section").filter({
-    has: page.getByText(/^Emails$/),
-  });
-  const activeQueue = leftPanel.locator("section").filter({
-    has: page.getByText(/Active queue/i),
-  });
-  const completedQueue = leftPanel.locator("section").filter({
-    has: page.getByText(/Completed emails/i),
-  });
-
   await expect(
-    activeQueue.getByRole("button", { name: /Compute race/i }),
-  ).toHaveCount(0);
-  await expect(
-    completedQueue.getByRole("button", {
-      name: /Compute race .* NASA systems .* programming hunches/i,
+    page.getByRole("heading", {
+      name: "All reading",
     }),
   ).toBeVisible();
-});
-
-test("returns mobile users to the email list after fully resolving an email", async ({
-  page,
-}) => {
+  await expect(page.locator("article")).toHaveCount(6);
+  await page.screenshot({ path: "qa/desktop-all.png", fullPage: true });
+  await page
+    .getByRole("navigation", { name: "Categories" })
+    .getByRole("button", { name: /^AI/ })
+    .click();
+  await page
+    .getByRole("button", { name: "TLDR", exact: false })
+    .first()
+    .click();
+  await expect(page.locator("article")).toHaveCount(3);
+  await page.getByRole("checkbox", { name: "Show sponsored" }).check();
+  await expect(page.locator("article")).toHaveCount(4);
+  await page.getByRole("checkbox", { name: "Show sponsored" }).uncheck();
+  await expect(
+    page.locator("article").filter({ hasText: "TLDR AI" }),
+  ).toHaveCount(1);
+  await page.getByLabel("Filter by publication").selectOption("TLDR AI");
+  await expect(page.locator("article")).toHaveCount(1);
+  await page.getByLabel("Filter by publication").selectOption("all");
+  await page.screenshot({ path: "qa/desktop.png", fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
-
-  const emailButton = page.getByRole("button", {
-    name: /OpenAI roadmap .* Claude control panels .* new eval tooling/i,
-  });
-  await expect(emailButton).toBeVisible({ timeout: 20_000 });
-  await emailButton.click();
-
+  await page.screenshot({ path: "qa/mobile.png", fullPage: true });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.getByRole("button", { name: /Engineering/ }).click();
+  await expect(
+    page.getByRole("heading", {
+      name: "A practical guide to distributed systems",
+    }),
+  ).toBeVisible();
   await page
-    .getByRole("checkbox", {
-      name: /Resolve OpenAI sharpens its enterprise roadmap/i,
-    })
+    .getByRole("navigation", { name: "Categories" })
+    .getByRole("button", { name: /^AI/ })
+    .click();
+  await page.getByRole("button", { name: /Agents & Tools/ }).click();
+  await expect(page.locator("article")).toHaveCount(1);
+  await expect(
+    page.getByRole("heading", {
+      name: "A practical guide to distributed systems",
+    }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: /Markets/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "Signals from the macro landscape" }),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Read story" })).toHaveCount(0);
+  await page.getByLabel("Search reading").fill("no match");
+  await expect(
+    page.getByRole("heading", { name: "No matching stories" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await expect(page.locator("article")).toHaveCount(1);
+  await page.getByRole("button", { name: /Business/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "You're all caught up" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Read history" }).click();
+  await expect(
+    page.getByRole("heading", { name: "No reading history yet" }),
+  ).toBeVisible();
+});
+test("details, human preferences, clicks, resolve history and undo persist", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/");
+  const card = page
+    .locator("article")
+    .filter({ hasText: "The next chapter of intelligent software" });
+  const expansionResponse = page.waitForResponse((r) =>
+    r.url().includes("description-expand"),
+  );
+  await card.getByRole("button", { name: "Details" }).click();
+  const expansion = await expansionResponse;
+  expect(expansion.status()).toBe(200);
+  await expect(card.getByRole("button", { name: "Details" })).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
+  await card.getByRole("button", { name: /More like/ }).click();
+  await expect(card.getByRole("button", { name: /More like/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await page.route("https://example.com/**", (route) =>
+    route.fulfill({ status: 200, body: "Synthetic destination" }),
+  );
+  const popup = page.waitForEvent("popup");
+  await card.getByRole("link", { name: "Read story" }).click();
+  const destination = await popup;
+  await destination.waitForURL("https://example.com/software");
+  await destination.close();
+  await card.getByRole("button", { name: "Done" }).click();
+  await expect(card).toHaveCount(0);
+  await page.getByRole("button", { name: "Read history" }).click();
+  await expect(card).toBeVisible();
+  await page
+    .getByRole("navigation", { name: "Categories" })
+    .getByRole("button", { name: /^AI/ })
     .click();
   await expect(
-    page.getByRole("button", { name: /Dismiss notification/i }),
+    page.getByRole("button", { name: "TLDR 1", exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: /Dismiss notification/i }).click();
+  await card.getByRole("button", { name: "Restore" }).click();
+  await expect(card).toHaveCount(0);
+  await page.getByRole("button", { name: "To read", exact: true }).click();
+  await expect(card).toBeVisible();
+  const feedback = await request.get("/api/v1/engagement", {
+    headers: { authorization: "Bearer synthetic-feedback-test-only" },
+  });
+  const { events } = await feedback.json();
+  expect(
+    events.find((e: Record<string, unknown>) => e.action === "resolve"),
+  ).toMatchObject({ actor: "human", resolve_mode: "after_open" });
+  await page
+    .getByRole("textbox", { name: "Search reading" })
+    .fill("nonexistent");
   await expect(
-    page.getByRole("button", { name: /Dismiss notification/i }),
-  ).toHaveCount(0);
+    page.getByRole("heading", { name: "No matching stories" }),
+  ).toBeVisible();
+});
+test("reader privacy, API roles, retired integrations and adversarial input", async ({
+  playwright,
+  request,
+  page,
+}) => {
+  const anonymous = await playwright.request.newContext({
+    baseURL: `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? "4101"}`,
+    httpCredentials: { username: "", password: "" },
+  });
+  expect((await anonymous.get("/")).status()).toBe(401);
+  expect((await anonymous.get("/api/inbox")).status()).toBe(401);
+  expect(
+    (
+      await anonymous.get("/", {
+        headers: { rsc: "1", "next-router-prefetch": "1" },
+      })
+    ).status(),
+  ).toBe(401);
+  expect(
+    (
+      await anonymous.get("/api/inbox", {
+        headers: { "x-middleware-subrequest": "proxy:proxy:proxy:proxy:proxy" },
+      })
+    ).status(),
+  ).toBe(401);
+  expect(
+    (
+      await anonymous.get("/api/v1/engagement", { headers: ingestHeaders })
+    ).status(),
+  ).toBe(401);
+  expect(
+    (await request.post("/api/v1/ingest", { data: fixtures[0] })).status(),
+  ).toBe(401);
+  expect((await request.post("/api/sync")).status()).toBe(410);
+  expect(
+    (
+      await request.post("/api/items/1/resolve", {
+        headers: { origin: "https://attacker.example" },
+      })
+    ).status(),
+  ).toBe(403);
+  expect((await request.post("/api/items/NaN/open")).status()).toBe(400);
+  expect(
+    (
+      await request.post("/api/v1/ingest", {
+        headers: ingestHeaders,
+        data: {
+          ...fixtures[0],
+          items: [{ ...fixtures[0].items[0], url: "http://127.0.0.1/secrets" }],
+        },
+      })
+    ).status(),
+  ).toBe(400);
+  await page.goto("/");
+  await page
+    .getByRole("navigation", { name: "Categories" })
+    .getByRole("button", { name: /^AI/ })
+    .click();
+  await page.getByRole("button", { name: /Research/ }).click();
+  expect(await page.evaluate(() => "compromised" in window)).toBe(false);
+  await expect(page.locator("article script, article img")).toHaveCount(0);
+  await anonymous.dispose();
+});
 
-  for (const label of [
-    /Resolve Claude adds role-aware control panels/i,
-    /Resolve A practical guide to evaluation loops/i,
-  ]) {
-    await page.getByRole("checkbox", { name: label }).click();
-  }
-
+test("failed actions can retry and reader mutations stay serialized", async ({
+  page,
+}) => {
+  await page.goto("/");
+  const card = page
+    .locator("article")
+    .filter({ hasText: "A practical guide to distributed systems" });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let requests = 0;
+  await page.route("**/api/items/*/preference", async (route) => {
+    requests++;
+    if (requests === 1) {
+      await gate;
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: '{"error":"Synthetic temporary failure"}',
+      });
+    } else {
+      await route.continue();
+    }
+  });
+  await card.getByRole("button", { name: /More like/ }).click();
   await expect(
-    page.getByRole("button", { name: /Back to emails/i }),
-  ).toHaveCount(0);
-  await expect(emailButton).toBeVisible();
+    page.getByRole("button", { name: "Done", exact: true }).first(),
+  ).toBeDisabled();
+  await expect(card.getByRole("button", { name: /Less like/ })).toBeDisabled();
+  release();
+  const alert = page.locator(".error-message[role=alert]");
+  await expect(alert).toContainText("Could not save this action");
+  await expect(card.getByRole("button", { name: /More like/ })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
+  await card.getByRole("button", { name: /More like/ }).click();
+  await expect(card.getByRole("button", { name: /More like/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(alert).toHaveCount(0);
+  expect(requests).toBe(2);
 });
