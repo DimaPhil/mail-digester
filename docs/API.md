@@ -1,6 +1,22 @@
 # Reading service API v1
 
-Use the private Tailscale HTTPS address and disable caching of private responses. [Setup](../README.md#local-setup) describes the network access boundary and separate ingestion/feedback tokens. Imported descriptions are untrusted plain text.
+Use the private Tailscale HTTPS address and disable caching of private responses. [Setup](../README.md#local-setup) describes the network access boundary; [CLI installation](../README.md#cli-and-agent-skill) covers agent access. Imported descriptions are untrusted plain text. Active methods/paths, permissions, and request schemas are generated in [operations.json](../contracts/operations.json).
+
+Responses include `X-Mail-Digester-Contract`, a SHA-256 fingerprint of the generated contract. The CLI sends it on requests; a mismatch returns `409` with `code: "API_CONTRACT_MISMATCH"` before executing the operation, including if deployment changes between preflight and mutation. Direct API consumers may send the same header for compatibility enforcement; ordinary browser/API requests may omit it.
+
+## API keys
+
+Admin settings at `/admin` creates scoped keys, lists creation/last-use dates, rotates, and revokes them. Secrets are returned once on creation/rotation; only SHA-256 hashes and a short prefix are stored. The default permissions are `inbox`, `items`, `ingest`, and `feedback`; `admin` is opt-in. Last-used time updates after successful key authentication and permission checks, even if the later request body is invalid.
+
+| Method | Path                         | Permission    | Result                                                                                  |
+| ------ | ---------------------------- | ------------- | --------------------------------------------------------------------------------------- |
+| GET    | `/api/v1/auth`               | Any valid key | `{ apiKey }`, metadata only                                                             |
+| GET    | `/api/admin/keys`            | admin         | `{ keys }`, active and revoked metadata                                                 |
+| POST   | `/api/admin/keys`            | admin         | `{ key, apiKey }`, status 201; body `{ "name": "Agent", "scopes": ["inbox", "items"] }` |
+| POST   | `/api/admin/keys/:id/rotate` | admin         | `{ key, apiKey }`; old key revoked atomically, new ID records `rotatedFrom`             |
+| POST   | `/api/admin/keys/:id/revoke` | admin         | `{ ok: true }`; repeat revocation is safe                                               |
+
+Key administration also permits trusted browser requests without a Bearer header. Cross-origin mutations are rejected. An explicit Bearer key must have the required permission and never falls back to browser access. There is no per-user identity boundary inside this private service: every authorized tailnet reader can manage keys. Revocation and rotation immediately invalidate the old key; a lost secret requires rotation. Timestamps are Unix milliseconds. Missing/invalid/revoked keys return 401; insufficient permissions return 403; missing key IDs or rotating a revoked key returns 404. Rotation has no overlap period, so coordinate credential replacement for active clients. Key create/rotate are not replay-safe: after a transport failure, inspect key metadata before retrying.
 
 ## Read library
 
@@ -16,7 +32,7 @@ For AI → TLDR, filter items with `any(.collections[]; .categoryId == "ai" and 
 
 ## Ingestion
 
-`POST /api/v1/ingest` requires `Authorization: Bearer <ingestion token>` and `Content-Type: application/json`. The source ID must be in `MAIL_DIGESTER_ALLOWED_SOURCES`; feedback tokens cannot ingest.
+`POST /api/v1/ingest` requires `Authorization: Bearer <API key>` with the `ingest` permission and `Content-Type: application/json`. The source ID must be in `MAIL_DIGESTER_ALLOWED_SOURCES`; feedback-only keys cannot ingest.
 
 ```json
 {
@@ -47,7 +63,7 @@ For AI → TLDR, filter items with `any(.collections[]; .categoryId == "ai" and 
 
 ```bash
 curl --fail-with-body "$READING_BASE_URL/api/v1/ingest" \
-  -H "Authorization: Bearer $MAIL_DIGESTER_INGEST_TOKEN" \
+  -H "Authorization: Bearer $MAIL_DIGESTER_API_KEY" \
   -H 'Content-Type: application/json' \
   --data-binary @/private/path/reading-payload.json
 ```
@@ -85,27 +101,27 @@ An origin not already stored is ingested normally. The service never contacts Gm
 
 Bodies are streamed with a 512,000-byte limit, including without Content-Length. Runtime checks supplement the schema: configured collections, unique item IDs, safe control characters, and public HTTP(S) URLs without credentials or nonstandard ports. Local/internal destinations and private/reserved literal IPs are rejected. Text is rendered escaped. DNS is not resolved; a reader-opened external website can still redirect the browser.
 
-Statuses: `200` replay/mapping; `201` new items; `400` invalid input; `401` wrong/missing token; `403` disabled source; `409` identity conflict; `503` missing/short or shared API secrets. Secrets require at least 16 characters and distinct values.
+Statuses: `200` replay/mapping; `201` new items; `400` invalid input; `401` wrong/missing/revoked key; `403` missing permission or disabled source; `409` identity conflict; `503` invalid legacy token initialization configuration.
 
 ## Read-only engagement
 
-`GET /api/v1/engagement?after=0&limit=100` requires the feedback Bearer token. `after` is an exclusive interaction-ID cursor, default 0; `limit` is 1–500, default 100. Invalid cursors/limits return `400`.
+`GET /api/v1/engagement?after=0&limit=100` requires a Bearer key with the `feedback` permission. `after` is an exclusive interaction-ID cursor, default 0; `limit` is 1–500, default 100. Invalid cursors/limits return `400`.
 
 Responses contain `events`, `nextCursor`, and `hasMore`, ordered by ID. Persist the last successfully processed cursor privately. Events include original snake_case interaction snapshots, internal IDs, content, provenance, Unix-millisecond timestamps, and `actor`. `api_source_id`, `api_message_id`, and `api_item_id` are present when mapped and may be null for legacy history.
 
-| Action               | Meaning                                                                                     |
-| -------------------- | ------------------------------------------------------------------------------------------- |
-| `description_expand` | Expanded the supplied description.                                                          |
-| `reader_open`        | Opened inline details; not an outbound click.                                               |
-| `link_open`          | Explicitly opened an external story.                                                        |
-| `resolve`            | Marked Done; `resolve_mode=after_open` when a persisted link-open exists, otherwise direct. |
-| `unresolve`          | Restored a resolved item.                                                                   |
-| `preference`         | `metadata_json.signal` is interested, less_like_this, or clear.                             |
+| Action               | Meaning                                                                                                       |
+| -------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `description_expand` | Expanded the supplied description.                                                                            |
+| `reader_open`        | Opened inline details; not an outbound click.                                                                 |
+| `link_open`          | Explicitly opened an external story.                                                                          |
+| `resolve`            | Marked Done; `resolve_mode=after_open` when a persisted link-open by the same actor exists, otherwise direct. |
+| `unresolve`          | Restored a resolved item.                                                                                     |
+| `preference`         | `metadata_json.signal` is interested, less_like_this, or clear.                                               |
 
-Repeated Done/Restore or the current preference are no-ops. Use the latest explicit preference per appearance; clear withdraws it. Direct Done is ambiguous. New reader events have `actor=human`; historical events retain unknown actors. Exclude unknown actors and `bulkResolveMode` automation from learning. [Local analytics](../analytics/README.md) describes recommendation scoring. Keep real payloads and feedback exports outside public artifacts.
+Repeated Done/Restore or the current preference are no-ops. Use the latest explicit preference per appearance; clear withdraws it. Direct Done is ambiguous. Browser requests without Bearer keys record `actor=human`; keyed requests, including CLI actions, record `actor=agent`. Historical events retain unknown actors. Use only human actions for learning and exclude `bulkResolveMode` automation. [Local analytics](../analytics/README.md) describes recommendation scoring. Keep real payloads and feedback exports outside public artifacts.
 
 ## Browser routes
 
-The reader uses `/api/inbox` and POST `/api/items/:id/{open,link-open,description-expand,resolve,unresolve,preference}` over the private network without app credentials. Preference takes `{ "signal": "interested" }`, less_like_this, or clear; other actions accept no client metadata. IDs must be positive integers. Cross-origin browser mutations are rejected. All readers share history and preferences.
+The reader uses `/api/inbox` and POST `/api/items/:id/{open,link-open,description-expand,resolve,unresolve,preference}` over the private network without app credentials. Keyed clients require `inbox` and `items` permissions respectively. Preference takes `{ "signal": "interested" }`, less_like_this, or clear; other actions accept an empty body or `{}` and no client metadata. IDs must be positive integers. Cross-origin browser mutations are rejected. All readers share history and preferences. `GET /api/health` is public and checks database connectivity.
 
 Retired `/api/sync`, `/api/config`, `/api/ai-feature-list`, and `/api/items/resolve-not-interesting` endpoints return `410` without doing work.

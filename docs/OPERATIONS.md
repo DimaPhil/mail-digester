@@ -9,6 +9,10 @@ Use the [README setup](../README.md#local-setup) for credentials and runtime req
 - Set `MAIL_DIGESTER_PUBLIC_ORIGIN` to the Tailscale HTTPS origin. Forward Authorization and Host through the proxy, disable private-response caching, and use a body limit that allows the API's 512,000 bytes.
 - Store databases, backups, payloads, and ingestion checkpoints privately, outside the source checkout. The service does not retrieve mail or schedule ingestion.
 
+Existing `MAIL_DIGESTER_INGEST_TOKEN` and `MAIL_DIGESTER_FEEDBACK_TOKEN` values are imported once into the database with their original individual permissions. They must be distinct and at least 16 characters when set. Empty values are allowed on fresh installations: create keys in Admin settings. After import, deleting/changing environment variables does not revoke or replace keys; manage them in Admin settings. Revocation survives restarts even while an old environment value remains configured. Backups now include key hashes and revocation history; protect them as credential data. Restore can undo later revocations, so reconcile key status before reconnecting API clients after rollback.
+
+Contract changes require the server and installed CLI to update together. CLI preflight checks reject mismatched revisions before writes. Re-run the private GitHub global installation command from the README after deploying a new API contract.
+
 ## Preserve an existing database
 
 Pause writes while taking the baseline and comparing copies. SQLite's backup API captures committed WAL data; copying only a live `.sqlite` file can lose it. Keep the original volume and previous image intact.

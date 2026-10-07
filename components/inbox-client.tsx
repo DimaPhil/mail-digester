@@ -10,6 +10,7 @@ import {
   Inbox,
   RefreshCw,
   Search,
+  Settings,
   ThumbsDown,
   ThumbsUp,
   Undo2,
@@ -182,6 +183,9 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
             </button>
           ))}
         </nav>
+        <Link className="category-button admin-link" href="/admin">
+          <Settings size={18} /> Admin settings
+        </Link>
       </aside>
       <main className="main-content">
         <header className="topbar">

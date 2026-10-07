@@ -339,7 +339,7 @@ it("enforces separate ingestion/feedback tokens, source allowlist, bounds, and c
   expect((await POST(req(fixture, "wrong"))).status).toBe(401);
   expect(
     (await POST(req(fixture, "synthetic-feedback-test-only"))).status,
-  ).toBe(401);
+  ).toBe(403);
   expect(
     (
       await POST(
@@ -395,14 +395,12 @@ it("enforces separate ingestion/feedback tokens, source allowlist, bounds, and c
     ).status,
   ).toBe(400);
   delete process.env.MAIL_DIGESTER_INGEST_TOKEN;
-  expect((await POST(req(fixture))).status).toBe(503);
+  expect((await POST(req(fixture))).status).toBe(200);
 });
 it("returns an empty private library without side effects and handles invalid JSON envelopes", async () => {
   const { service } = await setup();
   expect((await service.getInboxPayload()).emails).toEqual([]);
-  const { readBoundedJson, matchesSecret } = await import("@/lib/api/security");
-  expect(matchesSecret("same", "same")).toBe(false);
-  expect(matchesSecret("different", "synthetic-long-secret")).toBe(false);
+  const { readBoundedJson } = await import("@/lib/api/security");
   await expect(
     readBoundedJson(new Request("http://localhost", { method: "POST" })),
   ).rejects.toThrow(/application\/json/);
@@ -414,6 +412,25 @@ it("returns an empty private library without side effects and handles invalid JS
       }),
     ),
   ).rejects.toThrow(/Missing body/);
+});
+it("does not count an agent click as a human read before Done", async () => {
+  const { ingest, service } = await setup();
+  const id = ingest(ingestSchema.parse(fixture)).items[0].internalId;
+  await service.recordLinkOpen(id, {}, "agent");
+  await service.resolveItem(id);
+  expect(rows("item_interactions").at(-1)).toMatchObject({
+    actor: "human",
+    resolve_mode: "direct",
+    opened_before_resolve: 0,
+  });
+  await service.unresolveItem(id);
+  await service.recordLinkOpen(id);
+  await service.resolveItem(id);
+  expect(rows("item_interactions").at(-1)).toMatchObject({
+    actor: "human",
+    resolve_mode: "after_open",
+    opened_before_resolve: 1,
+  });
 });
 it("keeps input defaults optional in the published JSON Schema", () => {
   expect(inputSchema.properties.message.required).toEqual([
