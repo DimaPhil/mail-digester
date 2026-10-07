@@ -52,4 +52,10 @@ mail-digester keys revoke --id 12
 
 Persist `nextCursor` only after successfully processing a page; continue while `hasMore`. For learning, include known human actors and exclude bulk automation. Latest explicit preference per appearance wins; clear withdraws it; direct Done and Restore are neutral. Recommendations are proposals for review, not automatically applied filtering rules.
 
-Key administration requires the admin permission when using the CLI. Rotation returns a replacement secret once and immediately revokes the old key; update stored credentials deliberately. Capture the full response privately, for example `(umask 077; set -C; mail-digester keys rotate --id 12 > /private/new-key.json)`. Never print that file. Create/rotate are not replay-safe; after a transport failure, inspect key metadata before retrying. Revoke/rotate only keys the user authorized you to manage. A contract mismatch stops the write; report that outcome and align versions within authorized scope. A key operation does not authorize deploying a server update. Use `mail-digester health` for a public, read-only health check. Retired sync/config/AI-list APIs are intentionally absent from the CLI.
+Key administration requires the admin permission when using the CLI. Rotation returns a replacement secret once and immediately revokes the old key; update stored credentials deliberately. Capture the full response in a private, user-writable file; print only its path:
+
+```bash
+(umask 077; key_file="$(mktemp "${TMPDIR:-/tmp}/mail-digester-key.XXXXXX")" || exit 1; mail-digester keys rotate --id 12 > "$key_file" && printf '%s\n' "$key_file")
+```
+
+Never print that file. Create/rotate are not replay-safe; after a transport failure, inspect key metadata before retrying. Revoke/rotate only keys the user authorized you to manage. A contract mismatch stops the write; report that outcome and align versions within authorized scope. A key operation does not authorize deploying a server update. Use `mail-digester health` for a public, read-only health check. Retired sync/config/AI-list APIs are intentionally absent from the CLI.
