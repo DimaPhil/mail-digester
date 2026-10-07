@@ -1,4 +1,125 @@
 @import "tailwindcss";
+.admin-content {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 36px 28px;
+}
+.admin-back,
+.key-actions,
+.key-heading,
+.key-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.admin-back {
+  color: var(--accent);
+  margin-bottom: 28px;
+}
+.admin-link {
+  margin-top: 24px;
+}
+.key-form {
+  display: grid;
+  gap: 18px;
+  margin: 28px 0;
+}
+.key-form > label,
+.key-secret label {
+  display: grid;
+  gap: 8px;
+}
+.key-form input:not([type="checkbox"]),
+.key-secret input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+.key-form fieldset {
+  border: 0;
+  padding: 0;
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.key-form legend {
+  margin-bottom: 10px;
+}
+.key-scope {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.key-primary,
+.key-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+.key-primary {
+  justify-self: start;
+  background: var(--accent);
+  color: #fff;
+}
+.key-secret {
+  padding: 20px;
+  background: #edf4f0;
+  border-radius: 12px;
+}
+.key-secret .key-actions {
+  margin-top: 12px;
+}
+.key-note {
+  color: var(--muted);
+  margin: 24px 0;
+}
+.key-entry {
+  padding: 22px 0;
+  border-top: 1px solid var(--line);
+}
+.key-heading {
+  justify-content: space-between;
+}
+.key-heading h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.key-meta {
+  color: var(--muted);
+  margin-top: 10px;
+  overflow-wrap: anywhere;
+}
+.key-entry dl {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.key-entry dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+.key-entry dd {
+  margin: 5px 0;
+}
+.key-revoked .key-heading {
+  color: var(--muted);
+}
+@media (max-width: 600px) {
+  .admin-content {
+    padding: 24px 18px;
+  }
+  .key-form input:not([type="checkbox"]),
+  .key-secret input {
+    font-size: 16px;
+  }
+}
 :root {
   color-scheme: light;
   --text: #182326;

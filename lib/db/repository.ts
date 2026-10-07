@@ -42,6 +42,7 @@ export function recordItemInteraction(
   itemId: number,
   action: ItemInteractionAction,
   metadata: ItemInteractionMetadata = {},
+  actor: "human" | "agent" = "human",
 ) {
   const db = getSqlite();
   const row = db
@@ -55,9 +56,9 @@ export function recordItemInteraction(
       ? Boolean(
           db
             .prepare(
-              "SELECT 1 FROM item_interactions WHERE item_id = ? AND action = 'link_open' LIMIT 1",
+              "SELECT 1 FROM item_interactions WHERE item_id = ? AND action = 'link_open' AND actor = ? LIMIT 1",
             )
-            .get(itemId),
+            .get(itemId, actor),
         )
       : null;
   const columns = [
@@ -92,7 +93,7 @@ export function recordItemInteraction(
     itemId,
     row.email_id,
     action,
-    "human",
+    actor,
     action === "resolve" ? (opened ? "after_open" : "direct") : null,
     opened == null ? null : Number(opened),
     row.provider,

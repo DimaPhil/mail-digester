@@ -327,6 +327,20 @@ export function migrateDatabase(sqlite: Database.Database) {
       item_id INTEGER PRIMARY KEY REFERENCES items(id), signal TEXT NOT NULL,
       updated_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS api_keys (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      prefix TEXT NOT NULL,
+      scopes_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      last_used_at INTEGER,
+      revoked_at INTEGER,
+      rotated_from INTEGER REFERENCES api_keys(id)
+    );
+    CREATE TABLE IF NOT EXISTS api_key_bootstrap (
+      id INTEGER PRIMARY KEY CHECK(id = 1)
+    );
   `);
   })();
 }

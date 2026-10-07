@@ -1,0 +1,534 @@
+{
+  "version": 1,
+  "scopes": ["inbox", "items", "ingest", "feedback", "admin"],
+  "defaultScopes": ["inbox", "items", "ingest", "feedback"],
+  "operations": [
+    {
+      "id": "health",
+      "command": "health",
+      "method": "GET",
+      "path": "/api/health",
+      "summary": "Check service health",
+      "browser": true
+    },
+    {
+      "id": "inbox",
+      "command": "inbox",
+      "method": "GET",
+      "path": "/api/inbox",
+      "summary": "Read the complete library",
+      "scope": "inbox",
+      "browser": true
+    },
+    {
+      "id": "ingest",
+      "command": "ingest",
+      "method": "POST",
+      "path": "/api/v1/ingest",
+      "summary": "Import one email and its items",
+      "scope": "ingest",
+      "body": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "source": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "allOf": [
+                  {
+                    "pattern": "^[a-zA-Z0-9@._:+/-]+$"
+                  },
+                  {
+                    "pattern": "^[a-z0-9][a-z0-9_-]*$"
+                  }
+                ]
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              }
+            },
+            "required": ["id", "label"],
+            "additionalProperties": false
+          },
+          "message": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "pattern": "^[a-zA-Z0-9@._:+/-]+$"
+              },
+              "subject": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "receivedAt": {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+              },
+              "senderName": {
+                "default": "",
+                "type": "string",
+                "maxLength": 200
+              },
+              "origin": {
+                "type": "object",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "const": "gmail"
+                  },
+                  "messageId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "pattern": "^[a-zA-Z0-9@._:+/-]+$"
+                  }
+                },
+                "required": ["provider", "messageId"],
+                "additionalProperties": false
+              },
+              "senderEmail": {
+                "default": "",
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "email",
+                    "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+                  },
+                  {
+                    "type": "string",
+                    "const": ""
+                  }
+                ]
+              },
+              "description": {
+                "default": "",
+                "type": "string",
+                "maxLength": 2000
+              }
+            },
+            "required": ["id", "subject", "receivedAt"],
+            "additionalProperties": false
+          },
+          "items": {
+            "minItems": 1,
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200,
+                  "pattern": "^[a-zA-Z0-9@._:+/-]+$"
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "description": {
+                  "default": "",
+                  "type": "string",
+                  "maxLength": 20000
+                },
+                "url": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "legacyItemId": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "section": {
+                  "default": "Reading",
+                  "type": "string",
+                  "maxLength": 100
+                },
+                "readTime": {
+                  "type": "string",
+                  "maxLength": 50
+                },
+                "kind": {
+                  "default": "editorial",
+                  "type": "string",
+                  "enum": ["editorial", "sponsor", "discussion", "other"]
+                },
+                "collections": {
+                  "default": [],
+                  "maxItems": 10,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "categoryId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200,
+                        "pattern": "^[a-zA-Z0-9@._:+/-]+$"
+                      },
+                      "categoryLabel": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      },
+                      "tabId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200,
+                        "pattern": "^[a-zA-Z0-9@._:+/-]+$"
+                      },
+                      "tabLabel": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 80
+                      }
+                    },
+                    "required": [
+                      "categoryId",
+                      "categoryLabel",
+                      "tabId",
+                      "tabLabel"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": ["id", "title"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["source", "message", "items"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "engagement",
+      "command": "engagement",
+      "method": "GET",
+      "path": "/api/v1/engagement",
+      "summary": "Read engagement events by cursor",
+      "scope": "feedback",
+      "query": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "after": {
+            "default": 0,
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "limit": {
+            "default": 100,
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500
+          }
+        },
+        "required": ["after", "limit"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "auth",
+      "command": "auth status",
+      "method": "GET",
+      "path": "/api/v1/auth",
+      "summary": "Validate the current API key"
+    },
+    {
+      "id": "item-open",
+      "command": "item open",
+      "method": "POST",
+      "path": "/api/items/{id}/open",
+      "summary": "Open inline details",
+      "scope": "items",
+      "browser": true,
+      "body": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "default": {},
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^\\d+$"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "id": "item-link-open",
+      "command": "item link-open",
+      "method": "POST",
+      "path": "/api/items/{id}/link-open",
+      "summary": "Record an outbound click",
+      "scope": "items",
+      "browser": true,
+      "body": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "default": {},
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^\\d+$"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "id": "item-description-expand",
+      "command": "item description-expand",
+      "method": "POST",
+      "path": "/api/items/{id}/description-expand",
+      "summary": "Record expanded description",
+      "scope": "items",
+      "browser": true,
+      "body": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "default": {},
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^\\d+$"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "id": "item-resolve",
+      "command": "item resolve",
+      "method": "POST",
+      "path": "/api/items/{id}/resolve",
+      "summary": "Mark an item Done",
+      "scope": "items",
+      "browser": true,
+      "body": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "default": {},
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^\\d+$"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "id": "item-unresolve",
+      "command": "item unresolve",
+      "method": "POST",
+      "path": "/api/items/{id}/unresolve",
+      "summary": "Restore an item to To read",
+      "scope": "items",
+      "browser": true,
+      "body": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "default": {},
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^\\d+$"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "id": "item-preference",
+      "command": "item preference",
+      "method": "POST",
+      "path": "/api/items/{id}/preference",
+      "summary": "Set or clear an explicit preference",
+      "scope": "items",
+      "browser": true,
+      "body": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "signal": {
+            "type": "string",
+            "enum": ["interested", "less_like_this", "clear"]
+          }
+        },
+        "required": ["signal"],
+        "additionalProperties": false
+      },
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^\\d+$"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "id": "keys-list",
+      "command": "keys list",
+      "method": "GET",
+      "path": "/api/admin/keys",
+      "summary": "List API key metadata",
+      "scope": "admin",
+      "browser": true
+    },
+    {
+      "id": "keys-create",
+      "command": "keys create",
+      "method": "POST",
+      "path": "/api/admin/keys",
+      "summary": "Create a key; secret returned once",
+      "scope": "admin",
+      "browser": true,
+      "body": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "scopes": {
+            "default": ["inbox", "items", "ingest", "feedback"],
+            "minItems": 1,
+            "maxItems": 5,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["inbox", "items", "ingest", "feedback", "admin"]
+            }
+          }
+        },
+        "required": ["name"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "keys-revoke",
+      "command": "keys revoke",
+      "method": "POST",
+      "path": "/api/admin/keys/{id}/revoke",
+      "summary": "Revoke an API key",
+      "scope": "admin",
+      "browser": true,
+      "body": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "default": {},
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^\\d+$"
+          }
+        },
+        "required": ["id"]
+      }
+    },
+    {
+      "id": "keys-rotate",
+      "command": "keys rotate",
+      "method": "POST",
+      "path": "/api/admin/keys/{id}/rotate",
+      "summary": "Replace a key and revoke the old one atomically",
+      "scope": "admin",
+      "browser": true,
+      "body": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "default": {},
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "params": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^\\d+$"
+          }
+        },
+        "required": ["id"]
+      }
+    }
+  ],
+  "retired": [
+    {
+      "path": "/api/sync",
+      "methods": ["GET", "POST", "PATCH"]
+    },
+    {
+      "path": "/api/config",
+      "methods": ["GET", "POST", "PATCH"]
+    },
+    {
+      "path": "/api/ai-feature-list",
+      "methods": ["GET", "POST", "PATCH"]
+    },
+    {
+      "path": "/api/items/resolve-not-interesting",
+      "methods": ["GET", "POST", "PATCH"]
+    }
+  ]
+}

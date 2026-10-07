@@ -82,25 +82,31 @@ export async function getInboxPayload() {
 export async function recordLinkOpen(
   itemId: number,
   metadata: ItemInteractionMetadata = {},
+  actor: "human" | "agent" = "human",
 ) {
-  recordItemInteraction(itemId, "link_open", metadata);
+  recordItemInteraction(itemId, "link_open", metadata, actor);
   return { ok: true };
 }
 export async function recordDescriptionExpand(
   itemId: number,
   metadata: ItemInteractionMetadata = {},
+  actor: "human" | "agent" = "human",
 ) {
-  recordItemInteraction(itemId, "description_expand", metadata);
+  recordItemInteraction(itemId, "description_expand", metadata, actor);
   return { ok: true };
 }
-export async function openItem(itemId: number) {
-  recordItemInteraction(itemId, "reader_open");
+export async function openItem(
+  itemId: number,
+  actor: "human" | "agent" = "human",
+) {
+  recordItemInteraction(itemId, "reader_open", {}, actor);
   return { ok: true };
 }
 function transition(
   itemId: number,
   resolved: boolean,
   metadata: ItemInteractionMetadata = {},
+  actor: "human" | "agent" = "human",
 ) {
   const db = getSqlite();
   db.transaction(() => {
@@ -115,7 +121,12 @@ function transition(
     db.prepare(
       "UPDATE items SET resolved_at = ?, updated_at = ? WHERE id = ?",
     ).run(resolved ? now : null, now, itemId);
-    recordItemInteraction(itemId, resolved ? "resolve" : "unresolve", metadata);
+    recordItemInteraction(
+      itemId,
+      resolved ? "resolve" : "unresolve",
+      metadata,
+      actor,
+    );
     db.prepare(
       `UPDATE emails SET resolved_items = (SELECT COUNT(*) FROM items WHERE email_id = ? AND resolved_at IS NOT NULL), completion_state = CASE WHEN NOT EXISTS (SELECT 1 FROM items WHERE email_id = ? AND resolved_at IS NULL) THEN 'complete' ELSE 'active' END, updated_at = ? WHERE id = ?`,
     ).run(row.email_id, row.email_id, now, row.email_id);
@@ -124,17 +135,22 @@ function transition(
 export async function resolveItem(
   itemId: number,
   metadata: ItemInteractionMetadata = {},
+  actor: "human" | "agent" = "human",
 ) {
-  transition(itemId, true, metadata);
+  transition(itemId, true, metadata, actor);
   return (await getInboxPayload()).emails;
 }
-export async function unresolveItem(itemId: number) {
-  transition(itemId, false);
+export async function unresolveItem(
+  itemId: number,
+  actor: "human" | "agent" = "human",
+) {
+  transition(itemId, false, {}, actor);
   return (await getInboxPayload()).emails;
 }
 export async function setPreference(
   itemId: number,
   signal: "interested" | "less_like_this" | "clear",
+  actor: "human" | "agent" = "human",
 ) {
   const db = getSqlite();
   db.transaction(() => {
@@ -142,7 +158,7 @@ export async function setPreference(
       .prepare("SELECT signal FROM reader_preferences WHERE item_id = ?")
       .get(itemId) as { signal: string } | undefined;
     if (current?.signal === signal) return;
-    recordItemInteraction(itemId, "preference", { signal });
+    recordItemInteraction(itemId, "preference", { signal }, actor);
     db.prepare(
       "INSERT INTO reader_preferences VALUES (?, ?, ?) ON CONFLICT(item_id) DO UPDATE SET signal = excluded.signal, updated_at = excluded.updated_at",
     ).run(itemId, signal, Date.now());

@@ -248,6 +248,13 @@ it("keeps unknown and automatic behavior out of preference learning", async () =
   ).toBe(false);
   expect(
     isHumanPreferenceEvidence({
+      actor: "agent",
+      action: "preference",
+      metadataJson: '{"signal":"interested"}',
+    }),
+  ).toBe(false);
+  expect(
+    isHumanPreferenceEvidence({
       actor: "human",
       action: "resolve",
       metadataJson: '{"bulkResolveMode":"not_interesting"}',

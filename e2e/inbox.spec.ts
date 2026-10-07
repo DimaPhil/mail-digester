@@ -261,7 +261,12 @@ test("details, human preferences, clicks, resolve history and undo persist", asy
   });
   const { events } = await feedback.json();
   expect(
-    events.find((e: Record<string, unknown>) => e.action === "resolve"),
+    events.find(
+      (e: Record<string, unknown>) =>
+        e.action === "resolve" &&
+        e.api_source_id === "tldr" &&
+        e.api_item_id === "story-1",
+    ),
   ).toMatchObject({ actor: "human", resolve_mode: "after_open" });
   await page
     .getByRole("textbox", { name: "Search reading" })
@@ -286,7 +291,7 @@ test("reader access, API roles, retired integrations and adversarial input", asy
     (
       await request.get("/api/v1/engagement", { headers: ingestHeaders })
     ).status(),
-  ).toBe(401);
+  ).toBe(403);
   expect(
     (await request.post("/api/v1/ingest", { data: fixtures[0] })).status(),
   ).toBe(401);
