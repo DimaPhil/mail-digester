@@ -17,13 +17,19 @@ import {
 } from "lucide-react";
 import type { InboxPayload } from "@/lib/inbox/types";
 type ReadingItem = InboxPayload["emails"][number]["items"][number];
+const interestLabels: Record<string, string> = {
+  interesting: "Interesting",
+  not_interesting: "Not interesting",
+  unclassified: "Unclassified",
+};
 export function InboxClient({ initialData }: { initialData: InboxPayload }) {
   const [data, setData] = useState(initialData),
     [category, setCategory] = useState("all-categories"),
     [tab, setTab] = useState("all"),
     [query, setQuery] = useState(""),
     [publication, setPublication] = useState("all"),
-    [showRead, setShowRead] = useState(false),
+    [showArchive, setShowArchive] = useState(false),
+    [interestFilter, setInterestFilter] = useState("all"),
     [showSponsors, setShowSponsors] = useState(false),
     [expanded, setExpanded] = useState<number[]>([]),
     [busy, setBusy] = useState<number | null>(null),
@@ -76,6 +82,11 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
             ),
           ]).entries(),
         );
+  const matchesView = (item: ReadingItem) =>
+    item.readingState === (showArchive ? "archived" : "to_read") &&
+    (!showArchive ||
+      interestFilter === "all" ||
+      item.interestCategory === interestFilter);
   const visible = scoped.filter(
     (i) =>
       (tab === "all" ||
@@ -84,13 +95,13 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
         )) &&
       (showSponsors || i.itemKind !== "sponsor") &&
       (publication === "all" || i.email.sourceVariant === publication) &&
-      (showRead ? i.resolvedAt != null : i.resolvedAt == null) &&
+      matchesView(i) &&
       `${i.title} ${i.summary} ${i.email.sourceVariant} ${i.email.subject}`
         .toLowerCase()
         .includes(query.trim().toLowerCase()),
   );
   const remaining = scoped.filter(
-    (i) => i.resolvedAt == null && (showSponsors || i.itemKind !== "sponsor"),
+    (i) => matchesView(i) && (showSponsors || i.itemKind !== "sponsor"),
   ).length;
   async function refresh() {
     const version = ++refreshVersion.current;
@@ -169,11 +180,14 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
             >
               <Inbox size={18} />
               <span>{label}</span>
-              <span className="count" title="Unread stories">
+              <span
+                className="count"
+                title={showArchive ? "Archived stories" : "Stories to read"}
+              >
                 {
                   all.filter(
                     (i) =>
-                      i.resolvedAt == null &&
+                      matchesView(i) &&
                       (showSponsors || i.itemKind !== "sponsor") &&
                       (id === "all-categories" ||
                         i.collections.some((c) => c.categoryId === id)),
@@ -209,11 +223,17 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
             <div>
               <div className="eyebrow">YOUR READING SPACE</div>
               <h1>{categories.find(([id]) => id === activeCategory)?.[1]}</h1>
-              <p>Stories and newsletters, organized by topic.</p>
+              <p>
+                {showArchive
+                  ? "All your other stories, including those marked Done."
+                  : "Interesting stories and newsletters, ready to read."}
+              </p>
             </div>
             <div className="reading-count">
               <strong>{remaining}</strong>
-              <span>stories to read</span>
+              <span>
+                {showArchive ? "archived stories" : "stories to read"}
+              </span>
             </div>
           </div>
           <nav className="source-tabs" aria-label="Reading collections">
@@ -231,9 +251,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                   {
                     scoped.filter(
                       (i) =>
-                        (showRead
-                          ? i.resolvedAt != null
-                          : i.resolvedAt == null) &&
+                        matchesView(i) &&
                         (showSponsors || i.itemKind !== "sponsor") &&
                         i.collections.some(
                           (c) =>
@@ -248,15 +266,33 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
           <div className="list-toolbar">
             <div className="view-switch">
               <button
-                aria-pressed={!showRead}
-                onClick={() => setShowRead(false)}
+                aria-pressed={!showArchive}
+                onClick={() => setShowArchive(false)}
               >
                 To read
               </button>
-              <button aria-pressed={showRead} onClick={() => setShowRead(true)}>
-                Read history
+              <button
+                aria-pressed={showArchive}
+                onClick={() => setShowArchive(true)}
+              >
+                Archive
               </button>
             </div>
+            {showArchive && (
+              <select
+                className="publication-filter"
+                aria-label="Filter archive by interest"
+                value={interestFilter}
+                onChange={(e) => setInterestFilter(e.target.value)}
+              >
+                <option value="all">All interest categories</option>
+                {Object.entries(interestLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            )}
             <label className="sponsor-filter">
               <input
                 type="checkbox"
@@ -309,6 +345,15 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                     {item.email.sourceVariant}
                   </span>
                   <span>{item.section}</span>
+                  <span
+                    className="interest-badge"
+                    title={`Uploader: ${interestLabels[item.interestStatus]}`}
+                  >
+                    {interestLabels[item.interestCategory]}
+                  </span>
+                  {showArchive && (
+                    <span>{item.resolvedAt == null ? "Unread" : "Done"}</span>
+                  )}
                   {item.itemKind === "sponsor" && (
                     <span className="sponsor-badge">Sponsored</span>
                   )}
@@ -329,6 +374,11 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                 >
                   {item.summary}
                 </p>
+                {expanded.includes(item.id) && item.interestReason && (
+                  <p className="classification-reason">
+                    Uploader classification: {item.interestReason}
+                  </p>
+                )}
                 <div className="card-bottom">
                   <div className="story-links">
                     {item.safeUrl ? (
@@ -421,7 +471,13 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                       ) : (
                         <Check size={16} />
                       )}
-                      <span>{item.resolvedAt ? "Restore" : "Done"}</span>
+                      <span>
+                        {item.resolvedAt
+                          ? item.interestStatus === "interesting"
+                            ? "Restore"
+                            : "Mark unread"
+                          : "Done"}
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -432,26 +488,36 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
             <div className="empty-state">
               <Circle size={28} />
               <h2>
-                {query || publication !== "all" || tab !== "all"
+                {query ||
+                publication !== "all" ||
+                tab !== "all" ||
+                (showArchive && interestFilter !== "all")
                   ? "No matching stories"
-                  : showRead
-                    ? "No reading history yet"
+                  : showArchive
+                    ? "Archive is empty"
                     : "You're all caught up"}
               </h2>
               <p>
-                {query || publication !== "all" || tab !== "all"
+                {query ||
+                publication !== "all" ||
+                tab !== "all" ||
+                (showArchive && interestFilter !== "all")
                   ? "Try another search, publication, or collection."
-                  : showRead
-                    ? "Stories you mark Done will appear here."
-                    : "New stories will appear when added to your library."}
+                  : showArchive
+                    ? "Non-interesting, unclassified, and Done stories appear here."
+                    : "Interesting stories appear here. Other stories are in Archive."}
               </p>
-              {(query || publication !== "all" || tab !== "all") && (
+              {(query ||
+                publication !== "all" ||
+                tab !== "all" ||
+                (showArchive && interestFilter !== "all")) && (
                 <button
                   className="resolve-button"
                   onClick={() => {
                     setQuery("");
                     setPublication("all");
                     setTab("all");
+                    setInterestFilter("all");
                   }}
                 >
                   Clear filters

@@ -57,6 +57,8 @@ test("CLI executes every active REST operation, persists login, and records agen
         {
           id: "cli-story",
           title: "CLI integration story",
+          interestStatus: "not_interesting",
+          interestReason: "Synthetic uploader decision",
           kind: "sponsor",
           url: "https://example.com/cli",
           collections: [
@@ -83,6 +85,16 @@ test("CLI executes every active REST operation, persists login, and records agen
       ]).createdItems,
     ).toBe(0);
     const id = String(imported.items[0].internalId);
+    const importedItem = run("inbox")
+      .emails.flatMap((email: { items: { id: number }[] }) => email.items)
+      .find((item: { id: number }) => item.id === Number(id));
+    expect(importedItem).toMatchObject({
+      interestStatus: "not_interesting",
+      interestReason: "Synthetic uploader decision",
+      readingState: "archived",
+      interestCategory: "not_interesting",
+      resolvedAt: null,
+    });
     expect(
       run("inbox").emails.some(
         (email: { subject: string }) =>
@@ -98,10 +110,20 @@ test("CLI executes every active REST operation, persists login, and records agen
     ])
       run(command, ["--id", id]);
     run("item preference", ["--id", id, "--signal", "interested"]);
+    run("item resolve", ["--id", id]);
+    const archivedItem = run("inbox")
+      .emails.flatMap((email: { items: { id: number }[] }) => email.items)
+      .find((item: { id: number }) => item.id === Number(id));
+    expect(archivedItem).toMatchObject({
+      readingState: "archived",
+      interestStatus: "not_interesting",
+      interestCategory: "interesting",
+      preference: "interested",
+    });
     const events = run("engagement", ["--limit", "500"]).events.filter(
       (event: { item_id: number }) => event.item_id === Number(id),
     );
-    expect(events).toHaveLength(6);
+    expect(events).toHaveLength(7);
     expect(
       events.every((event: { actor: string }) => event.actor === "agent"),
     ).toBe(true);

@@ -20,12 +20,14 @@ Key administration also permits trusted browser requests without a Bearer header
 
 ## Read library
 
-`GET /api/inbox` requires Tailscale access, with no app credentials. It returns `{ navigation, emails }`; every email includes its items with `id`, `title`, `summary`, `safeUrl`, `resolvedAt`, `preference`, and `collections`. `resolvedAt: null` means To read. This is the same endpoint the browser uses; it returns the full library without server-side filtering or pagination. Apply filters in the client.
+`GET /api/inbox` requires Tailscale access, with no app credentials. It returns `{ navigation, emails }`; every email includes its items with `id`, `title`, `summary`, `safeUrl`, `resolvedAt`, `preference`, `interestStatus`, `interestReason`, `readingState`, `interestCategory`, and `collections`. This is the same endpoint the browser uses; it returns the full library without server-side filtering or pagination. Apply filters in the client.
+
+`readingState: "to_read"` means unresolved and classified interesting. `"archived"` includes every Done, not-interesting, and unclassified item. Archive is a view, not deletion or a reading event; archived items with `resolvedAt: null` are still unread. Like/Dislike only saves feedback and never resolves or moves an unread item. Once Done, `interestCategory` uses the saved feedback (`interested` → interesting, `less_like_this` → not_interesting); clear/no feedback falls back to the uploader's `interestStatus`. Topic/collection filters apply in both views. Restore only returns an item to To read when its original classification is interesting; marking other items unread leaves them in Archive. Legacy classifications remain effective without rewriting their rows.
 
 ```bash
 READING_BASE_URL=https://lilfeel-ai-mf.tail52362f.ts.net:8443
 curl --fail-with-body "$READING_BASE_URL/api/inbox" \
-  | jq '.emails[].items[] | select(.resolvedAt == null) | {id, title, url: .safeUrl, collections}'
+| jq '.emails[].items[] | select(.readingState == "to_read") | {id, title, url: .safeUrl, collections}'
 ```
 
 For AI → TLDR, filter items with `any(.collections[]; .categoryId == "ai" and .tabId == "tldr")`. A single item may have multiple memberships but occurs only once in the library response.
@@ -47,6 +49,8 @@ For AI → TLDR, filter items with `any(.collections[]; .categoryId == "ai" and 
       "id": "story-1",
       "title": "A field guide to learning systems",
       "description": "A concise, plain-text description.",
+      "interestStatus": "interesting",
+      "interestReason": "Concrete engineering lessons with practical technical depth.",
       "url": "https://example.com/research",
       "collections": [
         {
@@ -69,6 +73,8 @@ curl --fail-with-body "$READING_BASE_URL/api/v1/ingest" \
 ```
 
 The generated [input schema](ingest.schema.json) defines fields, defaults, and limits. Message `senderName`, `senderEmail`, and `description` default to empty strings. Items require only `id` and `title`; `section` defaults to Reading and `kind` to editorial. Omit `url` for a narrative newsletter. Raw mail HTML, mailbox credentials, arbitrary metadata, and unknown fields are rejected.
+
+Import every substantive link with `interestStatus` (`interesting`, `not_interesting`, or `unclassified`) and an optional plain-text `interestReason` (up to 2,000 characters). Classification happens in the producer; it is not user feedback and emits no engagement. Omitted classification stores unclassified and appears in Archive. Omitted fields stay absent from replay hashes, so payloads from older API importers still replay unchanged. Changing classification/reason under an existing ingestion identity conflicts like other content changes. Explicit legacy mappings preserve the old classification and reason as well as original content/state.
 
 Collection IDs and labels must match [navigation.json](../config/navigation.json). Multiple memberships share one item and reading state. Omitted collections use the [source catalog](../config/source-catalog.json) default; sources without a default require an explicit collection. Both TLDR editions also appear in AI → TLDR. Legacy sources without a route remain reachable under Unsorted. Sponsored items stay stored but are hidden by default.
 
