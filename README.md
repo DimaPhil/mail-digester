@@ -4,6 +4,8 @@ A private, single-reader library fed by structured email/link data. The assistan
 
 The reader has configurable category tabs and subtabs. AI → TLDR combines TLDR and TLDR AI while keeping each publication and appearance identifiable. Narrative newsletters can be shown without a link. Descriptions are plain text. There is no special AI feature list, automatic article fetch, remote image loading, or tracking pixel.
 
+Import all substantive links with their interest classification. **To read** shows unresolved interesting items. **Archive** keeps non-interesting, unclassified, and Done items, with topic and interest filters. Like/Dislike only saves feedback; Done archives the item and uses that feedback as its Archive interest category. Original uploader classifications remain stored, and clearing feedback restores that category. Existing legacy classifications work without a data rewrite.
+
 ## Local setup
 
 Use Node 24 LTS and `npm ci`. Copy `.env.example` to `.env.local`. Run `npm run dev`; the default address is `http://localhost:4001`. Create API keys in Admin settings. Use a synthetic, separate database for development. Do not point local development at the existing deployment database.

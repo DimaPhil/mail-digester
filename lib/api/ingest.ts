@@ -60,6 +60,11 @@ export const ingestSchema = z
             legacyItemId: z.number().int().positive().optional(),
             section: text(100).default("Reading"),
             readTime: text(50).optional(),
+            // Omitted classification must retain pre-classification replay hashes.
+            interestStatus: z
+              .enum(["interesting", "not_interesting", "unclassified"])
+              .optional(),
+            interestReason: text(2000).optional(),
             kind: z
               .enum(["editorial", "sponsor", "discussion", "other"])
               .default("editorial"),
@@ -280,7 +285,7 @@ export function ingest(input: IngestInput) {
         ).position;
         const row = db
           .prepare(
-            `INSERT INTO items (email_id, source_item_id, section, position, title, summary, read_time_text, item_kind, tracked_url, canonical_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO items (email_id, source_item_id, section, position, title, summary, read_time_text, item_kind, tracked_url, canonical_url, interest_status, interest_reason, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
           .run(
             emailId,
@@ -293,6 +298,8 @@ export function ingest(input: IngestInput) {
             item.kind,
             item.url ?? "",
             item.url ? canonicalizeUrl(item.url) : null,
+            item.interestStatus ?? "unclassified",
+            item.interestReason ?? null,
             timestamp,
             timestamp,
           );

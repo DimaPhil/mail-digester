@@ -132,6 +132,14 @@
             "type": "string",
             "maxLength": 50
           },
+          "interestStatus": {
+            "type": "string",
+            "enum": ["interesting", "not_interesting", "unclassified"]
+          },
+          "interestReason": {
+            "type": "string",
+            "maxLength": 2000
+          },
           "kind": {
             "default": "editorial",
             "type": "string",

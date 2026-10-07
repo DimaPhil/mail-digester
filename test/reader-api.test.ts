@@ -64,6 +64,106 @@ afterEach(() => {
 });
 const rows = (name: string) =>
   db.prepare(`SELECT * FROM ${name} ORDER BY id`).all();
+it("stores all interest classifications, preserves old replay hashes, and separates feedback from reading state", async () => {
+  const { ingest, service } = await setup();
+  const oldPayload = ingestSchema.parse(fixture);
+  expect(oldPayload.items[0]).not.toHaveProperty("interestStatus");
+  const oldImport = ingest(oldPayload);
+  const oldRows = rows("items");
+  expect(ingest(ingestSchema.parse(fixture)).createdItems).toBe(0);
+  expect(rows("items")).toEqual(oldRows);
+  const input = ingestSchema.parse({
+    ...fixture,
+    message: { ...fixture.message, id: "classified-issue" },
+    items: [
+      {
+        ...fixture.items[0],
+        id: "positive",
+        interestStatus: "interesting",
+        interestReason: "Technical depth",
+      },
+      {
+        ...fixture.items[0],
+        id: "negative",
+        interestStatus: "not_interesting",
+      },
+    ],
+  });
+  const result = ingest(input);
+  expect(ingest(input).createdItems).toBe(0);
+  expect(() =>
+    ingest({
+      ...input,
+      items: [{ ...input.items[0], interestStatus: "not_interesting" }],
+    }),
+  ).toThrow(/differs/);
+  const getItems = async () =>
+    (await service.getInboxPayload()).emails.flatMap((email) => email.items);
+  let all = await getItems();
+  expect(
+    all.find((item) => item.id === oldImport.items[0].internalId),
+  ).toMatchObject({
+    interestStatus: "unclassified",
+    readingState: "archived",
+    resolvedAt: null,
+  });
+  const [positive, negative] = result.items.map((item) => item.internalId);
+  expect(all.find((item) => item.id === positive)).toMatchObject({
+    interestStatus: "interesting",
+    interestReason: "Technical depth",
+    readingState: "to_read",
+  });
+  expect(all.find((item) => item.id === negative)).toMatchObject({
+    interestStatus: "not_interesting",
+    readingState: "archived",
+    resolvedAt: null,
+  });
+  await service.setPreference(positive, "less_like_this");
+  all = await getItems();
+  expect(all.find((item) => item.id === positive)).toMatchObject({
+    readingState: "to_read",
+    resolvedAt: null,
+    interestCategory: "interesting",
+  });
+  await service.resolveItem(positive);
+  all = await getItems();
+  expect(all.find((item) => item.id === positive)).toMatchObject({
+    readingState: "archived",
+    interestStatus: "interesting",
+    interestCategory: "not_interesting",
+    preference: "less_like_this",
+  });
+  await service.setPreference(positive, "clear");
+  expect(
+    (await getItems()).find((item) => item.id === positive)?.interestCategory,
+  ).toBe("interesting");
+  await service.unresolveItem(positive);
+  expect(
+    (await getItems()).find((item) => item.id === positive)?.readingState,
+  ).toBe("to_read");
+  await service.resolveItem(negative);
+  await service.unresolveItem(negative);
+  expect((await getItems()).find((item) => item.id === negative)).toMatchObject(
+    { readingState: "archived", resolvedAt: null },
+  );
+  expect(
+    rows("item_interactions").filter(
+      (event: unknown) => (event as { action: string }).action === "preference",
+    ),
+  ).toHaveLength(2);
+  expect(
+    ingestSchema.safeParse({
+      ...fixture,
+      items: [{ ...fixture.items[0], interestStatus: "invented" }],
+    }).success,
+  ).toBe(false);
+  expect(
+    ingestSchema.safeParse({
+      ...fixture,
+      items: [{ ...fixture.items[0], interestReason: "x".repeat(2001) }],
+    }).success,
+  ).toBe(false);
+});
 it("replays idempotently, appends new appearances, and rejects conflicting batches atomically", async () => {
   const { ingest, service } = await setup();
   const input = ingestSchema.parse(fixture);

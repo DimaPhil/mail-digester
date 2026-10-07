@@ -131,7 +131,13 @@ test.beforeAll(async ({ request }) => {
   for (const data of fixtures) {
     const response = await request.post("/api/v1/ingest", {
       headers: ingestHeaders,
-      data,
+      data: {
+        ...data,
+        items: data.items.map((item) => ({
+          ...item,
+          interestStatus: "interesting",
+        })),
+      },
     });
     expect([200, 201]).toContain(response.status());
   }
@@ -205,9 +211,9 @@ test("desktop reader and mobile layouts show configured categories and combined 
   await expect(
     page.getByRole("heading", { name: "You're all caught up" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Read history" }).click();
+  await page.getByRole("button", { name: "Archive", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "No reading history yet" }),
+    page.getByRole("heading", { name: "Archive is empty" }),
   ).toBeVisible();
 });
 test("details, human preferences, clicks, resolve history and undo persist", async ({
@@ -243,7 +249,7 @@ test("details, human preferences, clicks, resolve history and undo persist", asy
   await destination.close();
   await card.getByRole("button", { name: "Done" }).click();
   await expect(card).toHaveCount(0);
-  await page.getByRole("button", { name: "Read history" }).click();
+  await page.getByRole("button", { name: "Archive", exact: true }).click();
   await expect(card).toBeVisible();
   await page
     .getByRole("navigation", { name: "Categories" })
@@ -369,4 +375,98 @@ test("failed actions can retry and reader mutations stay serialized", async ({
   );
   await expect(alert).toHaveCount(0);
   expect(requests).toBe(2);
+});
+
+test("imports all links, defaults to interesting unread stories, and archives Done by feedback category", async ({
+  page,
+  request,
+}) => {
+  const payload = {
+    source: fixtures[0].source,
+    message: {
+      id: "synthetic-archive-issue",
+      subject: "Archive workflow fixture",
+      receivedAt: "2026-10-06T08:00:00Z",
+    },
+    items: [
+      {
+        id: "positive",
+        title: "Archive fixture technical deep dive",
+        interestStatus: "interesting",
+        interestReason: "Concrete technical mechanisms",
+      },
+      {
+        id: "negative",
+        title: "Archive fixture launch headline",
+        interestStatus: "not_interesting",
+        interestReason: "Shallow announcement",
+      },
+      { id: "unknown", title: "Archive fixture awaiting classification" },
+    ],
+  };
+  expect(
+    (
+      await request.post("/api/v1/ingest", {
+        headers: ingestHeaders,
+        data: payload,
+      })
+    ).status(),
+  ).toBe(201);
+  await page.goto("/");
+  await page.getByLabel("Search reading").fill("Archive fixture");
+  const cards = page.locator("article");
+  const positive = cards.filter({ hasText: "technical deep dive" });
+  await expect(cards).toHaveCount(1);
+  await positive.getByRole("button", { name: /Less like/ }).click();
+  await expect(
+    positive.getByRole("button", { name: /Less like/ }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(cards).toHaveCount(1);
+  await page.getByRole("button", { name: "Archive", exact: true }).click();
+  await expect(cards).toHaveCount(2);
+  await page
+    .getByLabel("Filter archive by interest")
+    .selectOption("not_interesting");
+  await expect(cards).toHaveCount(1);
+  await expect(cards).toContainText("launch headline");
+  await cards.getByRole("button", { name: "Details" }).click();
+  await expect(cards).toContainText(
+    "Uploader classification: Shallow announcement",
+  );
+  await page
+    .getByLabel("Filter archive by interest")
+    .selectOption("unclassified");
+  await expect(cards).toHaveCount(1);
+  await expect(cards).toContainText("awaiting classification");
+  await page.getByRole("button", { name: "To read", exact: true }).click();
+  await positive.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(cards).toHaveCount(0);
+  await page.getByRole("button", { name: "Archive", exact: true }).click();
+  await page
+    .getByLabel("Filter archive by interest")
+    .selectOption("not_interesting");
+  await expect(cards).toHaveCount(2);
+  await expect(positive).toContainText("Done");
+  await positive.getByRole("button", { name: /More like/ }).click();
+  await expect(positive).toHaveCount(0);
+  await page
+    .getByLabel("Filter archive by interest")
+    .selectOption("interesting");
+  await expect(positive).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: "Archive", exact: true }).click();
+  await page.getByLabel("Search reading").fill("Archive fixture");
+  await expect(cards).toHaveCount(3);
+  await page.screenshot({ path: "qa/archive-desktop.png", fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: "qa/archive-mobile.png", fullPage: true });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await positive.getByRole("button", { name: "Restore" }).click();
+  await expect(positive).toHaveCount(0);
+  await page.getByRole("button", { name: "To read", exact: true }).click();
+  await expect(positive).toBeVisible();
 });

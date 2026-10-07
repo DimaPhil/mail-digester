@@ -33,49 +33,69 @@ export async function getInboxPayload() {
       subject: email.subject,
       sourceVariant: email.sourceVariant,
       receivedAt: email.receivedAt,
-      items: email.items.map((item) => ({
-        id: item.id,
-        title: item.title,
-        summary: item.summary,
-        section: item.section,
-        readTimeText: item.readTimeText,
-        itemKind: item.itemKind,
-        resolvedAt: item.resolvedAt,
-        safeUrl: safeExternalUrl(
-          item.finalUrl ?? item.canonicalUrl ?? item.trackedUrl,
-        ),
-        preference: preferencesByItem.get(item.id) ?? null,
-        collections: (() => {
-          const stored = (navigationByItem.get(item.id) ?? []).map((n) => ({
-            categoryId: n.category_id,
-            categoryLabel: n.category_label,
-            tabId: n.tab_id,
-            tabLabel: n.tab_label,
-          }));
-          const defaults = defaultCollections(
-            email.provider === "gmail" && /^tldr$/i.test(email.sourceFamily)
-              ? "tldr"
-              : email.sourceFamily,
-          );
-          if (
-            /^tldr(?:-ai)?$/i.test(email.sourceFamily) &&
-            !stored.some((c) => c.categoryId === "ai" && c.tabId === "tldr")
-          )
-            return [...defaults, ...stored];
-          return stored.length
-            ? stored
-            : defaults.length
-              ? defaults
-              : [
-                  {
-                    categoryId: "unassigned",
-                    categoryLabel: "Unsorted",
-                    tabId: "all",
-                    tabLabel: "All reading",
-                  },
-                ];
-        })(),
-      })),
+      items: email.items.map((item) => {
+        const interestStatus =
+          item.interestStatus === "interesting" ||
+          item.interestStatus === "not_interesting"
+            ? item.interestStatus
+            : "unclassified";
+        const preference = preferencesByItem.get(item.id) ?? null;
+        return {
+          id: item.id,
+          title: item.title,
+          summary: item.summary,
+          section: item.section,
+          readTimeText: item.readTimeText,
+          itemKind: item.itemKind,
+          resolvedAt: item.resolvedAt,
+          interestStatus,
+          interestReason: item.interestReason,
+          readingState:
+            item.resolvedAt == null && interestStatus === "interesting"
+              ? ("to_read" as const)
+              : ("archived" as const),
+          interestCategory:
+            item.resolvedAt != null && preference === "interested"
+              ? "interesting"
+              : item.resolvedAt != null && preference === "less_like_this"
+                ? "not_interesting"
+                : interestStatus,
+          safeUrl: safeExternalUrl(
+            item.finalUrl ?? item.canonicalUrl ?? item.trackedUrl,
+          ),
+          preference,
+          collections: (() => {
+            const stored = (navigationByItem.get(item.id) ?? []).map((n) => ({
+              categoryId: n.category_id,
+              categoryLabel: n.category_label,
+              tabId: n.tab_id,
+              tabLabel: n.tab_label,
+            }));
+            const defaults = defaultCollections(
+              email.provider === "gmail" && /^tldr$/i.test(email.sourceFamily)
+                ? "tldr"
+                : email.sourceFamily,
+            );
+            if (
+              /^tldr(?:-ai)?$/i.test(email.sourceFamily) &&
+              !stored.some((c) => c.categoryId === "ai" && c.tabId === "tldr")
+            )
+              return [...defaults, ...stored];
+            return stored.length
+              ? stored
+              : defaults.length
+                ? defaults
+                : [
+                    {
+                      categoryId: "unassigned",
+                      categoryLabel: "Unsorted",
+                      tabId: "all",
+                      tabLabel: "All reading",
+                    },
+                  ];
+          })(),
+        };
+      }),
     })),
   };
 }
