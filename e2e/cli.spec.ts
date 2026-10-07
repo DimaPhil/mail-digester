@@ -107,6 +107,9 @@ test("CLI executes every active REST operation, persists login, and records agen
     ).toBe(true);
     const created = run("keys create", ["--name", "Synthetic child"]);
     expect(created.apiKey.scopes).toEqual(contract.defaultScopes);
+    key = created.key;
+    expect(run("auth status").apiKey.id).toBe(created.apiKey.id);
+    key = "";
     expect(
       run("keys list").keys.some(
         (k: { id: number; lastUsedAt: number | null }) => k.lastUsedAt !== null,

@@ -15,7 +15,7 @@ The browser and library API have no app login: access is restricted by the priva
 Install or update directly from the private repository using your GitHub SSH access:
 
 ```bash
-npm i -g git+ssh://git@github.com/DimaPhil/mail-digester.git
+npm i -g --install-links git+ssh://git@github.com/DimaPhil/mail-digester.git
 mail-digester --help
 mail-digester auth login
 mail-digester inbox
@@ -28,6 +28,8 @@ Create a key in the reader's **Admin settings**, then paste it into the hidden l
 The default server is `https://lilfeel-ai-mf.tail52362f.ts.net:8443`. Override it with `--url` or `MAIL_DIGESTER_URL`. Saved credentials apply only to their server origin. HTTPS is required except on localhost. JSON goes to stdout; errors go to stderr with a nonzero exit code. Use `--file PATH` or `--file -` for structured request bodies. Run `--help` for all item actions and key management commands.
 
 Global installation also installs the bundled [agent skill](skills/mail-digester/SKILL.md) into `~/.agents/skills/mail-digester` and creates a relative `~/.claude/skills/mail-digester` symlink. Updates refresh the managed skill. Conflicting user-owned skills are preserved and installation fails with an explanation. Lifecycle scripts must be enabled for automatic installation; if your npm policy disables them, run `mail-digester skill install`. Repository-local `npm ci` does not touch your home skills.
+
+`--install-links` prevents npm's Git preparation from leaving the global package linked to a temporary checkout that it deletes. The installed CLI has no runtime dependencies or build step. Web app dependencies are installed by repository `npm ci` (including devDependencies); production uses the traced Next.js standalone output built by Docker. Do not omit devDependencies from the app build stage.
 
 ## API and operations
 
@@ -45,6 +47,7 @@ npm run check
 npm run test:coverage
 npm run build
 npm run test:e2e
+npm run test:install
 ```
 
 The E2E server uses a fresh temporary SQLite database and a separate headless browser. All fixtures are synthetic. Desktop/mobile screenshots are written to ignored `qa/`. No test reads Gmail or production data.

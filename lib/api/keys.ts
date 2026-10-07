@@ -150,7 +150,7 @@ export function authenticateApiKey(
   }
   const token = request.headers
     .get("authorization")
-    ?.match(/^Bearer (\S+)$/)?.[1];
+    ?.match(/^Bearer (\S+)$/i)?.[1];
   if (!token || token.length < 16)
     return {
       denied: Response.json({ error: "Unauthorized" }, { status: 401 }),

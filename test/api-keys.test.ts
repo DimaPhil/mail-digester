@@ -151,6 +151,15 @@ it("validates shared requests, enforces explicit Bearer scope, and preserves tru
     ).json(),
   ).toEqual({ actor: "human" });
   expect((await inbox(request("not-a-key-long-enough"))).status).toBe(401);
+  expect(
+    (
+      await inbox(
+        new Request("http://localhost", {
+          headers: { authorization: "bearer not-a-key-long-enough" },
+        }),
+      )
+    ).status,
+  ).toBe(401);
   const key = createApiKey("Read only", ["inbox"]);
   const response = await inbox(request(key.key));
   expect(await response.json()).toEqual({ actor: "agent" });

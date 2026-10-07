@@ -15,7 +15,7 @@
     "dev": "node ./scripts/run-next-with-default-port.mjs dev",
     "build": "next build",
     "start": "node ./scripts/run-next-with-default-port.mjs start",
-    "prepare": "husky",
+    "prepare": "node -e \"if(require('fs').existsSync('node_modules/husky')) import('husky').then(({default:husky})=>husky())\"",
     "postinstall": "node -e \"if(process.env.npm_config_global==='true') import('./cli/skill.mjs')\"",
     "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix",
@@ -54,15 +54,6 @@
     "url": "https://github.com/DimaPhil/mail-digester/issues"
   },
   "homepage": "https://github.com/DimaPhil/mail-digester#readme",
-  "dependencies": {
-    "better-sqlite3": "^12.8.0",
-    "drizzle-orm": "^0.45.2",
-    "lucide-react": "^1.8.0",
-    "next": "^16.2.3",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5",
-    "zod": "^4.3.6"
-  },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4.1.15",
@@ -71,18 +62,25 @@
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@vitest/coverage-v8": "^4.1.4",
+    "better-sqlite3": "^12.8.0",
+    "drizzle-orm": "^0.45.2",
     "drizzle-kit": "^0.31.5",
     "eslint": "^9.39.4",
     "eslint-config-next": "^16.2.3",
     "eslint-config-prettier": "^10.1.8",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
+    "lucide-react": "^1.8.0",
+    "next": "^16.2.3",
     "postcss": "^8.5.6",
     "prettier": "^3.8.2",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
     "tailwindcss": "^4.1.15",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.4"
+    "vitest": "^4.0.4",
+    "zod": "^4.3.6"
   },
   "engines": {
     "node": ">=24 <25"

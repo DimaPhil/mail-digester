@@ -37,7 +37,7 @@ export function apiOperation(
       if (
         id !== "health" &&
         (!op.browser ||
-          request.headers.get("authorization")?.startsWith("Bearer"))
+          /^Bearer/i.test(request.headers.get("authorization") ?? ""))
       ) {
         const auth = authenticateApiKey(request, op.scope);
         if ("denied" in auth) return auth.denied;
