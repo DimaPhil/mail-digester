@@ -26,7 +26,11 @@ mail-digester item unresolve --id 123
 mail-digester item preference --id 123 --signal interested
 mail-digester item preference --id 123 --signal less_like_this
 mail-digester item preference --id 123 --signal clear
+mail-digester item resolve --id 123 --compact 1
+mail-digester item unresolve --id 123 --compact 1
 ```
+
+Use `--compact 1` for Done/Restore when only the confirmed item state is needed: returns `{ item }` with `id`, `resolvedAt`, `preference`, `readingState`, and `interestCategory`. Default responses still include the complete `{ emails }` library. Preference returns `{ ok: true, item }`. Browser lists render 50 matching stories per page; client filters and counts cover the entire library.
 
 The library response is `{ navigation, emails }`; `emails[].items[]` includes `id`, `title`, `summary`, `safeUrl`, `resolvedAt`, `preference`, `interestStatus`, `interestReason`, `readingState`, `interestCategory`, and `collections`. Filter `readingState == "to_read"` for the current queue: only unresolved items classified interesting. Archive (`"archived"`) includes all Done, not-interesting, and unclassified items; `resolvedAt: null` still means unread there. Like/Dislike saves feedback only. Once Done, `interestCategory` uses that feedback, falling back to the uploader's classification when cleared/absent. Topic filters work in both views. Restore brings originally interesting items back to To read; other items stay archived but become unread. Filter locally; no server-side query or pagination exists for the library. AI → TLDR means a collection with `categoryId == "ai"` and `tabId == "tldr"`, already including TLDR AI. Multiple topic memberships share one item/state. Done changes app state, never mailbox unread flags. `link-open` records a click; it does not fetch or open the website. CLI/keyed mutations are recorded as agent actions and excluded from human-only recommendation learning. Do not invent engagement by recording opens/clicks as part of a read-only inspection.
 

@@ -335,6 +335,10 @@ test("failed actions can retry and reader mutations stay serialized", async ({
   page,
 }) => {
   await page.goto("/");
+  let libraryRequests = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/inbox") libraryRequests++;
+  });
   const card = page
     .locator("article")
     .filter({ hasText: "A practical guide to distributed systems" });
@@ -361,6 +365,10 @@ test("failed actions can retry and reader mutations stay serialized", async ({
     page.getByRole("button", { name: "Done", exact: true }).first(),
   ).toBeDisabled();
   await expect(card.getByRole("button", { name: /Less like/ })).toBeDisabled();
+  await expect(card.getByRole("button", { name: /More like/ })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
   release();
   const alert = page.locator(".error-message[role=alert]");
   await expect(alert).toContainText("Could not save this action");
@@ -375,6 +383,124 @@ test("failed actions can retry and reader mutations stay serialized", async ({
   );
   await expect(alert).toHaveCount(0);
   expect(requests).toBe(2);
+  expect(libraryRequests).toBe(0);
+});
+
+test("Done waits for confirmation and ignores an older in-flight refresh", async ({
+  page,
+  request,
+}) => {
+  await page.goto("/");
+  const older = await (await request.get("/api/inbox")).json();
+  let releaseRefresh!: () => void;
+  const refreshGate = new Promise<void>((resolve) => {
+    releaseRefresh = resolve;
+  });
+  let refreshRequests = 0;
+  await page.route("**/api/inbox", async (route) => {
+    refreshRequests++;
+    await refreshGate;
+    await route.fulfill({ json: older });
+  });
+  await page.getByRole("button", { name: "Refresh library" }).click();
+  await expect.poll(() => refreshRequests).toBe(1);
+  let releaseAction!: () => void;
+  const actionGate = new Promise<void>((resolve) => {
+    releaseAction = resolve;
+  });
+  let saved = false;
+  await page.route("**/api/items/*/resolve?compact=1", async (route) => {
+    const response = await route.fetch();
+    expect(response.ok()).toBe(true);
+    expect((await response.json()).emails).toBeUndefined();
+    saved = true;
+    await actionGate;
+    await route.fulfill({ response });
+  });
+  const card = page
+    .locator("article")
+    .filter({ hasText: "Designing a calmer relationship with technology" });
+  await card.getByRole("button", { name: "Done", exact: true }).click();
+  await expect.poll(() => saved).toBe(true);
+  await expect(card).toBeVisible();
+  await expect(
+    card.getByRole("button", { name: "Done", exact: true }),
+  ).toBeDisabled();
+  releaseAction();
+  await expect(card).toHaveCount(0);
+  const refreshResponse = page.waitForResponse("**/api/inbox");
+  releaseRefresh();
+  await (await refreshResponse).finished();
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  await expect(card).toHaveCount(0);
+  expect(refreshRequests).toBe(1);
+  await page.getByRole("button", { name: "Archive", exact: true }).click();
+  await expect(card).toBeVisible();
+  await card.getByRole("button", { name: "Restore", exact: true }).click();
+  await expect(card).toHaveCount(0);
+  await page.getByRole("button", { name: "To read", exact: true }).click();
+  await expect(card).toBeVisible();
+  expect(refreshRequests).toBe(1);
+});
+
+test("large libraries render bounded pages and search the entire archive", async ({
+  page,
+  request,
+}) => {
+  const payload = await (await request.get("/api/inbox")).json();
+  const template = payload.emails[0];
+  const item = template.items[0];
+  payload.emails = [
+    {
+      ...template,
+      items: Array.from({ length: 7623 }, (_, index) => ({
+        ...item,
+        id: 100000 + index,
+        title: `Synthetic performance story ${index}`,
+        itemKind: "editorial",
+        resolvedAt: null,
+        readingState: index < 1062 ? "to_read" : "archived",
+        interestStatus: index < 1062 ? "interesting" : "not_interesting",
+        interestCategory: index < 1062 ? "interesting" : "not_interesting",
+      })),
+    },
+  ];
+  await page.route("**/api/inbox", (route) => route.fulfill({ json: payload }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Refresh library" }).click();
+  await expect(page.locator("article")).toHaveCount(50);
+  const pages = page.getByRole("navigation", { name: "Story pages" });
+  await expect(pages).toContainText("1–50 of 1062");
+  await pages.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(pages).toContainText("51–100 of 1062");
+  await page.getByRole("button", { name: "Archive", exact: true }).click();
+  await expect(page.locator("article")).toHaveCount(50);
+  await expect(pages).toContainText("1–50 of 6561");
+  await page.screenshot({ path: "qa/pagination-desktop.png", fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: "qa/pagination-mobile.png", fullPage: true });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await pages.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(pages).toContainText("51–100 of 6561");
+  await pages.getByRole("button", { name: "Previous", exact: true }).click();
+  await expect(pages).toContainText("1–50 of 6561");
+  await page
+    .getByLabel("Search reading")
+    .fill("Synthetic performance story 7622");
+  await expect(page.locator("article")).toHaveCount(1);
+  await expect(page.locator("article")).toContainText("story 7622");
+  await page.getByLabel("Search reading").fill("");
+  await expect(page.locator("article")).toHaveCount(50);
+  await expect(pages).toContainText("1–50 of 6561");
 });
 
 test("imports all links, defaults to interesting unread stories, and archives Done by feedback category", async ({

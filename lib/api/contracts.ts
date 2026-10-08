@@ -35,6 +35,9 @@ const engagementQuery = z
     limit: z.coerce.number().int().min(1).max(500).default(100),
   })
   .strict();
+const itemStateQuery = z
+  .object({ compact: z.coerce.number().int().min(0).max(1).default(0) })
+  .strict();
 
 type Operation = {
   id: string;
@@ -108,6 +111,9 @@ export const API_OPERATIONS: Operation[] = [
     browser: true,
     params: itemId,
     body: emptyBody,
+    ...(["resolve", "unresolve"].includes(action)
+      ? { query: itemStateQuery }
+      : {}),
   })),
   {
     id: "item-preference",

@@ -64,6 +64,53 @@ afterEach(() => {
 });
 const rows = (name: string) =>
   db.prepare(`SELECT * FROM ${name} ORDER BY id`).all();
+it("returns confirmed item state without rebuilding the library for compact mutations", async () => {
+  const { ingest, service } = await setup();
+  const id = ingest(
+    ingestSchema.parse({
+      ...fixture,
+      items: [{ ...fixture.items[0], interestStatus: "interesting" }],
+    }),
+  ).items[0].internalId;
+  const repository = await import("@/lib/db/repository");
+  const list = vi.spyOn(repository, "listInboxEmails");
+  try {
+    expect(await service.setPreference(id, "less_like_this")).toMatchObject({
+      ok: true,
+      item: {
+        id,
+        preference: "less_like_this",
+        resolvedAt: null,
+        readingState: "to_read",
+        interestCategory: "interesting",
+      },
+    });
+    const resolved = await service.resolveItem(id, {}, "human", true);
+    expect(resolved).toMatchObject({
+      item: {
+        id,
+        resolvedAt: expect.any(Number),
+        readingState: "archived",
+        interestCategory: "not_interesting",
+      },
+    });
+    expect(await service.resolveItem(id, {}, "human", true)).toEqual(resolved);
+    expect(await service.setPreference(id, "clear")).toMatchObject({
+      item: { interestCategory: "interesting", preference: "clear" },
+    });
+    expect(await service.unresolveItem(id, "human", true)).toMatchObject({
+      item: { resolvedAt: null, readingState: "to_read" },
+    });
+    expect(list).not.toHaveBeenCalled();
+    expect(await service.resolveItem(id)).toHaveProperty("emails");
+    expect(list).toHaveBeenCalledOnce();
+    await expect(service.unresolveItem(999, "human", true)).rejects.toThrow(
+      /not found/,
+    );
+  } finally {
+    list.mockRestore();
+  }
+});
 it("stores all interest classifications, preserves old replay hashes, and separates feedback from reading state", async () => {
   const { ingest, service } = await setup();
   const oldPayload = ingestSchema.parse(fixture);

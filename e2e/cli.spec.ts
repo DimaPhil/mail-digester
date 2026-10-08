@@ -111,6 +111,26 @@ test("CLI executes every active REST operation, persists login, and records agen
       run(command, ["--id", id]);
     run("item preference", ["--id", id, "--signal", "interested"]);
     run("item resolve", ["--id", id]);
+    const compact = run("item resolve", ["--id", id, "--compact", "1"]);
+    expect(compact.emails).toBeUndefined();
+    expect(compact.item).toMatchObject({
+      id: Number(id),
+      readingState: "archived",
+      interestCategory: "interesting",
+      preference: "interested",
+    });
+    expect(
+      run("item unresolve", ["--id", id, "--compact", "1"]).item,
+    ).toMatchObject({
+      id: Number(id),
+      resolvedAt: null,
+      readingState: "archived",
+      interestCategory: "not_interesting",
+    });
+    run("item resolve", ["--id", id, "--compact", "0"]);
+    expect(
+      (await request.post(`/api/items/${id}/resolve?compact=2`)).status(),
+    ).toBe(400);
     const archivedItem = run("inbox")
       .emails.flatMap((email: { items: { id: number }[] }) => email.items)
       .find((item: { id: number }) => item.id === Number(id));
@@ -123,7 +143,7 @@ test("CLI executes every active REST operation, persists login, and records agen
     const events = run("engagement", ["--limit", "500"]).events.filter(
       (event: { item_id: number }) => event.item_id === Number(id),
     );
-    expect(events).toHaveLength(7);
+    expect(events).toHaveLength(9);
     expect(
       events.every((event: { actor: string }) => event.actor === "agent"),
     ).toBe(true);
