@@ -354,6 +354,20 @@
         "properties": {},
         "additionalProperties": false
       },
+      "query": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "compact": {
+            "default": 0,
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": ["compact"],
+        "additionalProperties": false
+      },
       "params": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -379,6 +393,20 @@
         "default": {},
         "type": "object",
         "properties": {},
+        "additionalProperties": false
+      },
+      "query": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "compact": {
+            "default": 0,
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": ["compact"],
         "additionalProperties": false
       },
       "params": {

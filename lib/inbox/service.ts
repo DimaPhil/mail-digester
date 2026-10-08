@@ -7,6 +7,49 @@ import {
   type ItemInteractionMetadata,
 } from "@/lib/db/repository";
 import { safeExternalUrl } from "@/lib/content/safety";
+function readingState(
+  interestStatus: string,
+  resolvedAt: number | null,
+  preference: string | null,
+) {
+  const classification =
+    interestStatus === "interesting" || interestStatus === "not_interesting"
+      ? interestStatus
+      : "unclassified";
+  return {
+    readingState:
+      resolvedAt == null && classification === "interesting"
+        ? ("to_read" as const)
+        : ("archived" as const),
+    interestCategory:
+      resolvedAt != null && preference === "interested"
+        ? "interesting"
+        : resolvedAt != null && preference === "less_like_this"
+          ? "not_interesting"
+          : classification,
+  };
+}
+function getItemState(itemId: number) {
+  const row = getSqlite()
+    .prepare(
+      `SELECT i.id, i.interest_status AS interestStatus, i.resolved_at AS resolvedAt, p.signal AS preference FROM items i LEFT JOIN reader_preferences p ON p.item_id = i.id WHERE i.id = ?`,
+    )
+    .get(itemId) as
+    | {
+        id: number;
+        interestStatus: string;
+        resolvedAt: number | null;
+        preference: string | null;
+      }
+    | undefined;
+  if (!row) throw new Error("Item not found");
+  return {
+    id: row.id,
+    resolvedAt: row.resolvedAt,
+    preference: row.preference,
+    ...readingState(row.interestStatus, row.resolvedAt, row.preference),
+  };
+}
 export async function getInboxPayload() {
   const emails = await listInboxEmails(),
     db = getSqlite();
@@ -50,16 +93,7 @@ export async function getInboxPayload() {
           resolvedAt: item.resolvedAt,
           interestStatus,
           interestReason: item.interestReason,
-          readingState:
-            item.resolvedAt == null && interestStatus === "interesting"
-              ? ("to_read" as const)
-              : ("archived" as const),
-          interestCategory:
-            item.resolvedAt != null && preference === "interested"
-              ? "interesting"
-              : item.resolvedAt != null && preference === "less_like_this"
-                ? "not_interesting"
-                : interestStatus,
+          ...readingState(interestStatus, item.resolvedAt, preference),
           safeUrl: safeExternalUrl(
             item.finalUrl ?? item.canonicalUrl ?? item.trackedUrl,
           ),
@@ -156,16 +190,22 @@ export async function resolveItem(
   itemId: number,
   metadata: ItemInteractionMetadata = {},
   actor: "human" | "agent" = "human",
+  compact = false,
 ) {
   transition(itemId, true, metadata, actor);
-  return (await getInboxPayload()).emails;
+  return compact
+    ? { item: getItemState(itemId) }
+    : { emails: (await getInboxPayload()).emails };
 }
 export async function unresolveItem(
   itemId: number,
   actor: "human" | "agent" = "human",
+  compact = false,
 ) {
   transition(itemId, false, {}, actor);
-  return (await getInboxPayload()).emails;
+  return compact
+    ? { item: getItemState(itemId) }
+    : { emails: (await getInboxPayload()).emails };
 }
 export async function setPreference(
   itemId: number,
@@ -183,5 +223,5 @@ export async function setPreference(
       "INSERT INTO reader_preferences VALUES (?, ?, ?) ON CONFLICT(item_id) DO UPDATE SET signal = excluded.signal, updated_at = excluded.updated_at",
     ).run(itemId, signal, Date.now());
   }).immediate();
-  return { ok: true };
+  return { ok: true, item: getItemState(itemId) };
 }

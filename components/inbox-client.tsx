@@ -17,6 +17,12 @@ import {
 } from "lucide-react";
 import type { InboxPayload } from "@/lib/inbox/types";
 type ReadingItem = InboxPayload["emails"][number]["items"][number];
+const pageSize = 50;
+const dateFormat = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  timeZone: "UTC",
+});
 const interestLabels: Record<string, string> = {
   interesting: "Interesting",
   not_interesting: "Not interesting",
@@ -34,17 +40,20 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     [expanded, setExpanded] = useState<number[]>([]),
     [busy, setBusy] = useState<number | null>(null),
     [refreshing, setRefreshing] = useState(false),
+    [pagination, setPagination] = useState({ key: "", page: 0 }),
     [error, setError] = useState("");
   const pending = useRef(false);
   const refreshVersion = useRef(0);
   const all = useMemo(
     () =>
-      data.emails.flatMap((email) =>
-        email.items.map((item) => ({
+      data.emails.flatMap((email) => {
+        const date = dateFormat.format(new Date(email.receivedAt));
+        return email.items.map((item) => ({
           ...item,
           email,
-        })),
-      ),
+          date,
+        }));
+      }),
     [data],
   );
   const categories = Array.from(
@@ -103,6 +112,24 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
   const remaining = scoped.filter(
     (i) => matchesView(i) && (showSponsors || i.itemKind !== "sponsor"),
   ).length;
+  const pageKey = JSON.stringify([
+    activeCategory,
+    tab,
+    query,
+    publication,
+    showArchive,
+    interestFilter,
+    showSponsors,
+  ]);
+  const page = Math.min(
+    pagination.key === pageKey ? pagination.page : 0,
+    Math.max(0, Math.ceil(visible.length / pageSize) - 1),
+  );
+  const pageStart = page * pageSize;
+  function changePage(nextPage: number) {
+    setPagination({ key: pageKey, page: nextPage });
+    document.querySelector(".section-caption")?.scrollIntoView();
+  }
   async function refresh() {
     const version = ++refreshVersion.current;
     setRefreshing(true);
@@ -122,18 +149,42 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
     // ponytail: serialize reader mutations; use per-item queues if parallel actions matter.
     if (pending.current) return false;
     pending.current = true;
+    // Discard any refresh started before this write; it contains older state.
+    ++refreshVersion.current;
+    setRefreshing(false);
     setBusy(item.id);
     setError("");
     try {
-      const r = await fetch(`/api/items/${item.id}/${name}`, {
+      const compact = ["resolve", "unresolve"].includes(name)
+        ? "?compact=1"
+        : "";
+      const r = await fetch(`/api/items/${item.id}/${name}${compact}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: body ? JSON.stringify(body) : undefined,
       });
       if (!r.ok)
         throw new Error("Could not save this action. Please try again.");
-      if (["resolve", "unresolve", "preference"].includes(name))
-        await refresh();
+      if (["resolve", "unresolve", "preference"].includes(name)) {
+        const result = await r.json();
+        if (result.item?.id !== item.id)
+          throw new Error(
+            "Could not confirm the saved item. Refresh the library.",
+          );
+        setData((current) => ({
+          ...current,
+          emails: current.emails.map((email) =>
+            email.items.some((entry) => entry.id === item.id)
+              ? {
+                  ...email,
+                  items: email.items.map((entry) =>
+                    entry.id === item.id ? { ...entry, ...result.item } : entry,
+                  ),
+                }
+              : email,
+          ),
+        }));
+      }
       return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save action");
@@ -338,7 +389,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
             <span>NEWEST FIRST</span>
           </div>
           <div className="reading-list" aria-busy={refreshing}>
-            {visible.map((item) => (
+            {visible.slice(pageStart, pageStart + pageSize).map((item) => (
               <article className="reading-card" key={item.id}>
                 <div className="card-topline">
                   <span className="source-badge">
@@ -357,12 +408,7 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                   {item.itemKind === "sponsor" && (
                     <span className="sponsor-badge">Sponsored</span>
                   )}
-                  <span className="card-date">
-                    {new Date(item.email.receivedAt).toLocaleDateString(
-                      "en-US",
-                      { month: "short", day: "numeric", timeZone: "UTC" },
-                    )}
-                  </span>
+                  <span className="card-date">{item.date}</span>
                 </div>
                 <h2>{item.title}</h2>
                 <p
@@ -484,6 +530,28 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
               </article>
             ))}
           </div>
+          {visible.length > pageSize && (
+            <nav className="list-toolbar" aria-label="Story pages">
+              <button
+                className="resolve-button"
+                disabled={page === 0}
+                onClick={() => changePage(page - 1)}
+              >
+                Previous
+              </button>
+              <span aria-live="polite">
+                {pageStart + 1}–{Math.min(pageStart + pageSize, visible.length)}{" "}
+                of {visible.length}
+              </span>
+              <button
+                className="resolve-button"
+                disabled={pageStart + pageSize >= visible.length}
+                onClick={() => changePage(page + 1)}
+              >
+                Next
+              </button>
+            </nav>
+          )}
           {!visible.length && (
             <div className="empty-state">
               <Circle size={28} />
