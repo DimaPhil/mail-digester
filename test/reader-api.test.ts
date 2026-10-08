@@ -64,6 +64,84 @@ afterEach(() => {
 });
 const rows = (name: string) =>
   db.prepare(`SELECT * FROM ${name} ORDER BY id`).all();
+it("saves preference and resolution atomically, preserves actors, and retries without duplicate events", async () => {
+  const { ingest, service } = await setup();
+  const result = ingest(
+    ingestSchema.parse({
+      ...fixture,
+      items: [
+        { ...fixture.items[0], id: "positive", interestStatus: "interesting" },
+        { ...fixture.items[0], id: "negative", interestStatus: "interesting" },
+      ],
+    }),
+  );
+  const [positive, negative] = result.items.map((item) => item.internalId);
+  const baseline = fingerprint(db);
+  db.exec(
+    "CREATE TRIGGER synthetic_resolve_failure BEFORE UPDATE OF resolved_at ON items BEGIN SELECT RAISE(ABORT, 'Synthetic save failure'); END",
+  );
+  await expect(
+    service.resolveItem(positive, {}, "human", true, "interested"),
+  ).rejects.toThrow(/Synthetic save failure/);
+  expect(fingerprint(db, baseline)).toEqual(baseline);
+  db.exec("DROP TRIGGER synthetic_resolve_failure");
+  for (const [id, actor, signal, category] of [
+    [positive, "human", "interested", "interesting"],
+    [negative, "agent", "less_like_this", "not_interesting"],
+  ] as const) {
+    await service.recordLinkOpen(id, {}, actor);
+    const saved = await service.resolveItem(id, {}, actor, true, signal);
+    expect(saved).toMatchObject({
+      item: {
+        id,
+        resolvedAt: expect.any(Number),
+        preference: signal,
+        readingState: "archived",
+        interestCategory: category,
+      },
+    });
+    expect(await service.resolveItem(id, {}, actor, true, signal)).toEqual(
+      saved,
+    );
+    expect(rows("item_interactions").slice(-3)).toMatchObject([
+      { action: "link_open", actor },
+      {
+        action: "preference",
+        actor,
+        metadata_json: JSON.stringify({ signal }),
+      },
+      { action: "resolve", actor, resolve_mode: "after_open" },
+    ]);
+  }
+  expect(rows("item_interactions")).toHaveLength(6);
+  expect(rows("emails")[0]).toMatchObject({
+    resolved_items: 2,
+    completion_state: "complete",
+  });
+  const { POST } = await import("@/app/api/items/[id]/resolve/route");
+  for (const body of [
+    { signal: "clear" },
+    { signal: "invalid" },
+    { signal: "interested", extra: true },
+  ]) {
+    expect(
+      (
+        await POST(
+          new Request(
+            `http://localhost/api/items/${positive}/resolve?compact=1`,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify(body),
+            },
+          ),
+          { params: Promise.resolve({ id: String(positive) }) },
+        )
+      ).status,
+    ).toBe(400);
+  }
+  expect(rows("item_interactions")).toHaveLength(6);
+});
 it("returns confirmed item state without rebuilding the library for compact mutations", async () => {
   const { ingest, service } = await setup();
   const id = ingest(

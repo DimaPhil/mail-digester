@@ -351,7 +351,12 @@
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "default": {},
         "type": "object",
-        "properties": {},
+        "properties": {
+          "signal": {
+            "type": "string",
+            "enum": ["interested", "less_like_this"]
+          }
+        },
         "additionalProperties": false
       },
       "query": {

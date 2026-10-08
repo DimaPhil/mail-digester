@@ -8,6 +8,7 @@ import {
   ChevronDown,
   Circle,
   Inbox,
+  MoreHorizontal,
   RefreshCw,
   Search,
   Settings,
@@ -505,26 +506,93 @@ export function InboxClient({ initialData }: { initialData: InboxPayload }) {
                     >
                       <ThumbsDown size={16} />
                     </button>
-                    <button
-                      className="resolve-button"
-                      disabled={busy !== null}
-                      onClick={() =>
-                        action(item, item.resolvedAt ? "unresolve" : "resolve")
-                      }
-                    >
-                      {item.resolvedAt ? (
-                        <Undo2 size={16} />
-                      ) : (
-                        <Check size={16} />
-                      )}
-                      <span>
-                        {item.resolvedAt
-                          ? item.interestStatus === "interesting"
-                            ? "Restore"
-                            : "Mark unread"
-                          : "Done"}
-                      </span>
-                    </button>
+                    {item.resolvedAt != null ||
+                    ["interested", "less_like_this"].includes(
+                      item.preference ?? "",
+                    ) ? (
+                      <button
+                        className="resolve-button"
+                        disabled={busy !== null}
+                        onClick={() =>
+                          action(
+                            item,
+                            item.resolvedAt ? "unresolve" : "resolve",
+                          )
+                        }
+                      >
+                        {item.resolvedAt ? (
+                          <Undo2 size={16} />
+                        ) : (
+                          <Check size={16} />
+                        )}
+                        <span>
+                          {item.resolvedAt
+                            ? item.interestStatus === "interesting"
+                              ? "Restore"
+                              : "Mark unread"
+                            : "Done"}
+                        </span>
+                      </button>
+                    ) : (
+                      <div
+                        className="resolution-actions"
+                        role="group"
+                        aria-label={`Mark Done: ${item.title}`}
+                      >
+                        <button
+                          className="resolve-button"
+                          aria-label={`Like and mark Done: ${item.title}`}
+                          title="Like and mark Done"
+                          disabled={busy !== null}
+                          onClick={() =>
+                            action(item, "resolve", { signal: "interested" })
+                          }
+                        >
+                          <ThumbsUp size={16} />
+                          <span>Done</span>
+                        </button>
+                        <button
+                          className="resolve-button"
+                          aria-label={`Dislike and mark Done: ${item.title}`}
+                          title="Dislike and mark Done"
+                          disabled={busy !== null}
+                          onClick={() =>
+                            action(item, "resolve", {
+                              signal: "less_like_this",
+                            })
+                          }
+                        >
+                          <ThumbsDown size={16} />
+                          <span>Done</span>
+                        </button>
+                        <button
+                          className="icon-button"
+                          aria-label={`More actions: ${item.title}`}
+                          title="More actions"
+                          popoverTarget={`resolve-menu-${item.id}`}
+                          disabled={busy !== null}
+                        >
+                          <MoreHorizontal size={16} />
+                        </button>
+                        <div
+                          className="resolve-menu-options"
+                          id={`resolve-menu-${item.id}`}
+                          popover="auto"
+                        >
+                          <button
+                            className="resolve-button"
+                            disabled={busy !== null}
+                            onClick={(event) => {
+                              event.currentTarget.parentElement?.hidePopover();
+                              action(item, "resolve");
+                            }}
+                          >
+                            <Check size={16} />
+                            Done without feedback
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </article>

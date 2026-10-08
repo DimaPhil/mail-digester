@@ -147,6 +147,39 @@ test("CLI executes every active REST operation, persists login, and records agen
     expect(
       events.every((event: { actor: string }) => event.actor === "agent"),
     ).toBe(true);
+    run("item unresolve", ["--id", id, "--compact", "1"]);
+    const combined = run("item resolve", [
+      "--id",
+      id,
+      "--compact",
+      "1",
+      "--signal",
+      "less_like_this",
+    ]);
+    expect(combined.item).toMatchObject({
+      id: Number(id),
+      preference: "less_like_this",
+      readingState: "archived",
+      interestCategory: "not_interesting",
+    });
+    expect(
+      run("item resolve", [
+        "--id",
+        id,
+        "--compact",
+        "1",
+        "--signal",
+        "less_like_this",
+      ]),
+    ).toEqual(combined);
+    const combinedEvents = run("engagement", ["--limit", "500"]).events.filter(
+      (event: { item_id: number }) => event.item_id === Number(id),
+    );
+    expect(combinedEvents).toHaveLength(12);
+    expect(combinedEvents.slice(-2)).toMatchObject([
+      { action: "preference", actor: "agent" },
+      { action: "resolve", actor: "agent" },
+    ]);
     const created = run("keys create", ["--name", "Synthetic child"]);
     expect(created.apiKey.scopes).toEqual(contract.defaultScopes);
     key = created.key;
