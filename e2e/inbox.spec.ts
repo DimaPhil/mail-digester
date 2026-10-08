@@ -362,7 +362,7 @@ test("failed actions can retry and reader mutations stay serialized", async ({
   });
   await card.getByRole("button", { name: /More like/ }).click();
   await expect(
-    page.getByRole("button", { name: "Done", exact: true }).first(),
+    card.getByRole("button", { name: /^Like and mark Done:/ }),
   ).toBeDisabled();
   await expect(card.getByRole("button", { name: /Less like/ })).toBeDisabled();
   await expect(card.getByRole("button", { name: /More like/ })).toHaveAttribute(
@@ -420,11 +420,11 @@ test("Done waits for confirmation and ignores an older in-flight refresh", async
   const card = page
     .locator("article")
     .filter({ hasText: "Designing a calmer relationship with technology" });
-  await card.getByRole("button", { name: "Done", exact: true }).click();
+  await card.getByRole("button", { name: /^Like and mark Done:/ }).click();
   await expect.poll(() => saved).toBe(true);
   await expect(card).toBeVisible();
   await expect(
-    card.getByRole("button", { name: "Done", exact: true }),
+    card.getByRole("button", { name: /^Like and mark Done:/ }),
   ).toBeDisabled();
   releaseAction();
   await expect(card).toHaveCount(0);
@@ -595,4 +595,178 @@ test("imports all links, defaults to interesting unread stories, and archives Do
   await expect(positive).toHaveCount(0);
   await page.getByRole("button", { name: "To read", exact: true }).click();
   await expect(positive).toBeVisible();
+});
+
+test("one-click feedback and Done, persisted choices, neutral popover, and failed/slow saves", async ({
+  page,
+  request,
+}) => {
+  const imported = await (
+    await request.post("/api/v1/ingest", {
+      headers: ingestHeaders,
+      data: {
+        source: fixtures[0].source,
+        message: {
+          id: "synthetic-one-click",
+          subject: "One-click fixture",
+          receivedAt: "2026-10-07T08:00:00Z",
+        },
+        items: ["positive", "negative", "neutral"].map((id) => ({
+          id,
+          title: `One-click ${id} story`,
+          interestStatus: "interesting",
+        })),
+      },
+    })
+  ).json();
+  await page.goto("/");
+  const positive = page
+    .locator("article")
+    .filter({ hasText: "One-click positive story" });
+  const negative = page
+    .locator("article")
+    .filter({ hasText: "One-click negative story" });
+  const neutral = page
+    .locator("article")
+    .filter({ hasText: "One-click neutral story" });
+  await expect(
+    positive.getByRole("button", { name: /^Like and mark Done:/ }),
+  ).toBeVisible();
+  await expect(
+    positive.getByRole("button", { name: "Done", exact: true }),
+  ).toHaveCount(0);
+  await positive.getByRole("button", { name: /^Less like:/ }).click();
+  await expect(
+    positive.getByRole("button", { name: "Done", exact: true }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    positive.getByRole("button", { name: "Done", exact: true }),
+  ).toBeVisible();
+  await expect(
+    positive.getByRole("button", { name: /^Like and mark Done:/ }),
+  ).toHaveCount(0);
+  await positive.getByRole("button", { name: /^Less like:/ }).click();
+  await expect(
+    positive.getByRole("button", { name: /^Like and mark Done:/ }),
+  ).toBeVisible();
+  await positive
+    .locator(".story-actions")
+    .screenshot({ path: "qa/one-click-actions-desktop.png" });
+  let resolveRequests = 0,
+    libraryRequests = 0;
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/inbox") libraryRequests++;
+    if (
+      request.method() === "POST" &&
+      new URL(request.url()).pathname.endsWith("/resolve")
+    )
+      resolveRequests++;
+  });
+  await positive.getByRole("button", { name: /^Like and mark Done:/ }).click();
+  await expect(positive).toHaveCount(0);
+  expect(resolveRequests).toBe(1);
+  await page.getByRole("button", { name: "Archive", exact: true }).click();
+  await expect(
+    positive.getByRole("button", { name: /^More like:/ }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await positive.getByRole("button", { name: "Restore", exact: true }).click();
+  await page.getByRole("button", { name: "To read", exact: true }).click();
+  await expect(
+    positive.getByRole("button", { name: "Done", exact: true }),
+  ).toBeVisible();
+
+  let attempts = 0,
+    saved = false;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/items/*/resolve?compact=1", async (route) => {
+    if (route.request().postDataJSON()?.signal !== "less_like_this") {
+      await route.continue();
+      return;
+    }
+    attempts++;
+    if (attempts === 1) {
+      await route.fulfill({
+        status: 503,
+        json: { error: "Synthetic failure" },
+      });
+      return;
+    }
+    const response = await route.fetch();
+    saved = true;
+    await gate;
+    await route.fulfill({ response });
+  });
+  await negative
+    .getByRole("button", { name: /^Dislike and mark Done:/ })
+    .click();
+  await expect(page.locator(".error-message[role=alert]")).toContainText(
+    "Could not save this action",
+  );
+  await expect(
+    negative.getByRole("button", { name: /^Less like:/ }),
+  ).toHaveAttribute("aria-pressed", "false");
+  await negative
+    .getByRole("button", { name: /^Dislike and mark Done:/ })
+    .click();
+  await expect.poll(() => saved).toBe(true);
+  await expect(negative).toBeVisible();
+  await expect(
+    negative.getByRole("button", { name: /^Dislike and mark Done:/ }),
+  ).toBeDisabled();
+  await expect(
+    negative.getByRole("button", { name: /^Less like:/ }),
+  ).toHaveAttribute("aria-pressed", "false");
+  release();
+  await expect(negative).toHaveCount(0);
+  expect(attempts).toBe(2);
+
+  const more = neutral.getByRole("button", { name: /^More actions:/ });
+  const neutralDone = neutral.getByRole("button", {
+    name: "Done without feedback",
+    exact: true,
+  });
+  await more.focus();
+  await more.press("Enter");
+  await expect(neutralDone).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(neutralDone).toBeHidden();
+  await expect(more).toBeFocused();
+  await more.click();
+  await page.getByRole("heading", { name: "All reading", exact: true }).click();
+  await expect(neutralDone).toBeHidden();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await more.click();
+  await expect(neutralDone).toBeVisible();
+  const box = (await neutralDone.boundingBox())!;
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(390);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(844);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({ path: "qa/one-click-mobile.png", fullPage: true });
+  await neutralDone.click();
+  await expect(neutral).toHaveCount(0);
+  const payload = await (await request.get("/api/inbox")).json();
+  const items = payload.emails.flatMap(
+    (email: { items: Record<string, unknown>[] }) => email.items,
+  );
+  const neutralId = imported.items.find(
+    (item: { id: string }) => item.id === "neutral",
+  ).internalId;
+  expect(
+    items.find((item: { id: number }) => item.id === neutralId),
+  ).toMatchObject({
+    preference: null,
+    resolvedAt: expect.any(Number),
+    readingState: "archived",
+  });
+  expect(libraryRequests).toBe(0);
 });

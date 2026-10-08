@@ -20,6 +20,10 @@ export const createKeySchema = z
   })
   .strict();
 const emptyBody = z.object({}).strict().default({});
+const resolveBody = z
+  .object({ signal: z.enum(["interested", "less_like_this"]).optional() })
+  .strict()
+  .default({});
 const itemId = z.object({
   id: z
     .string()
@@ -110,7 +114,7 @@ export const API_OPERATIONS: Operation[] = [
     scope: "items" as const,
     browser: true,
     params: itemId,
-    body: emptyBody,
+    body: action === "resolve" ? resolveBody : emptyBody,
     ...(["resolve", "unresolve"].includes(action)
       ? { query: itemStateQuery }
       : {}),

@@ -191,8 +191,14 @@ export async function resolveItem(
   metadata: ItemInteractionMetadata = {},
   actor: "human" | "agent" = "human",
   compact = false,
+  signal?: "interested" | "less_like_this",
 ) {
-  transition(itemId, true, metadata, actor);
+  getSqlite()
+    .transaction(() => {
+      if (signal) writePreference(itemId, signal, actor);
+      transition(itemId, true, metadata, actor);
+    })
+    .immediate();
   return compact
     ? { item: getItemState(itemId) }
     : { emails: (await getInboxPayload()).emails };
@@ -207,7 +213,7 @@ export async function unresolveItem(
     ? { item: getItemState(itemId) }
     : { emails: (await getInboxPayload()).emails };
 }
-export async function setPreference(
+function writePreference(
   itemId: number,
   signal: "interested" | "less_like_this" | "clear",
   actor: "human" | "agent" = "human",
@@ -223,5 +229,12 @@ export async function setPreference(
       "INSERT INTO reader_preferences VALUES (?, ?, ?) ON CONFLICT(item_id) DO UPDATE SET signal = excluded.signal, updated_at = excluded.updated_at",
     ).run(itemId, signal, Date.now());
   }).immediate();
+}
+export async function setPreference(
+  itemId: number,
+  signal: "interested" | "less_like_this" | "clear",
+  actor: "human" | "agent" = "human",
+) {
+  writePreference(itemId, signal, actor);
   return { ok: true, item: getItemState(itemId) };
 }

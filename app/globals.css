@@ -532,6 +532,35 @@ h2 {
   margin-bottom: 20px;
   font-size: 13px;
 }
+.resolution-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border-left: 1px solid var(--line);
+  padding-left: 10px;
+  margin-left: 5px;
+}
+.resolution-actions .resolve-button {
+  margin-left: 0;
+  white-space: nowrap;
+}
+.resolve-menu-options {
+  position-area: top span-left;
+  position-try-fallbacks: flip-block;
+  justify-self: end;
+  margin: auto;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 4px 16px #14251b18;
+}
+@supports (position-area: top span-left) {
+  .resolve-menu-options {
+    inset: auto;
+    margin: 0 0 6px;
+  }
+}
 .empty-state {
   border: 1px dashed #d6e1da;
   border-radius: 12px;
